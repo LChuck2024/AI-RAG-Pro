@@ -40,7 +40,6 @@ from llama_index.core import (
     load_index_from_storage,
     Settings,
     PromptTemplate,
-    CallbackManager,
 )
 try:
     from llama_index.embeddings.dashscope import (
@@ -111,7 +110,7 @@ def _setup_langsmith_callback():
     设置LangSmith callback（如果启用）
     
     Returns:
-        CallbackManager: 配置好的CallbackManager，如果LangSmith未启用则返回None
+        callback_handler: 配置好的callback handler，如果LangSmith未启用则返回None
     """
     try:
         config = load_config()
@@ -144,12 +143,11 @@ def _setup_langsmith_callback():
             # 创建LlamaDebugHandler（LlamaIndex的LangSmith集成）
             # LlamaDebugHandler会自动使用LANGCHAIN环境变量
             callback_handler = LlamaDebugHandler()
-            callback_manager = CallbackManager([callback_handler])
             
             project_name = langsmith_config.get("project", "ai-rag-pro")
             logging.info(f"✅ LangSmith callback已启用，项目: {project_name}")
             logging.info(f"📊 查看追踪: https://smith.langchain.com/projects/{project_name}")
-            return callback_manager
+            return callback_handler
             
         except ImportError:
             logging.warning("⚠️ langsmith未安装，请运行: pip install langsmith")
@@ -168,9 +166,29 @@ def _apply_langsmith_settings():
     应用LangSmith设置到LlamaIndex全局Settings
     应该在RAGManager初始化之前调用
     """
-    callback_manager = _setup_langsmith_callback()
-    if callback_manager:
-        Settings.callback_manager = callback_manager
+    callback_handler = _setup_langsmith_callback()
+    if callback_handler:
+        # 尝试使用新的方式设置callback_manager
+        # 在新版本的LlamaIndex中，可以直接设置handler列表
+        try:
+            # 方法1: 尝试直接设置callback_manager为handler列表
+            Settings.callback_manager = [callback_handler]
+        except (TypeError, AttributeError):
+            try:
+                # 方法2: 尝试从callbacks模块导入CallbackManager
+                from llama_index.core.callbacks import CallbackManager
+                callback_manager = CallbackManager([callback_handler])
+                Settings.callback_manager = callback_manager
+            except ImportError:
+                # 方法3: 如果CallbackManager不存在，尝试直接设置handler
+                # 某些版本可能支持直接设置handler
+                try:
+                    Settings.callback_manager = callback_handler
+                except Exception as e:
+                    logging.warning(f"⚠️ 无法设置LangSmith callback_manager: {e}")
+                    logging.info("💡 LangSmith环境变量已设置，LlamaDebugHandler将自动工作")
+                    return
+        
         logging.info("✅ LangSmith callback已应用到LlamaIndex Settings")
 
 class RAGManager:

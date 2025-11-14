@@ -40,6 +40,7 @@ from llama_index.core import (
     load_index_from_storage,
     Settings,
     PromptTemplate,
+    CallbackManager,
 )
 try:
     from llama_index.embeddings.dashscope import (
@@ -104,6 +105,74 @@ except ImportError:
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# LangSmith callback支持
+def _setup_langsmith_callback():
+    """
+    设置LangSmith callback（如果启用）
+    
+    Returns:
+        CallbackManager: 配置好的CallbackManager，如果LangSmith未启用则返回None
+    """
+    try:
+        config = load_config()
+        monitoring_config = config.get("monitoring", {})
+        langsmith_config = monitoring_config.get("langsmith", {})
+        
+        if not langsmith_config.get("enabled", False):
+            logging.debug("LangSmith未启用，跳过callback设置")
+            return None
+        
+        langsmith_api_key = get_api_key("LANGCHAIN_API_KEY")
+        if not langsmith_api_key:
+            logging.warning("⚠️ LangSmith已配置但未找到LANGCHAIN_API_KEY，请在config/config.json中配置")
+            return None
+        
+        # 检查是否已安装langsmith
+        try:
+            from langsmith import Client
+            from llama_index.core.callbacks import LlamaDebugHandler
+            
+            # 设置环境变量（如果还未设置）
+            if not os.getenv("LANGCHAIN_API_KEY"):
+                os.environ["LANGCHAIN_API_KEY"] = langsmith_api_key
+            if not os.getenv("LANGCHAIN_TRACING"):
+                os.environ["LANGCHAIN_TRACING"] = "true" if langsmith_config.get("tracing", True) else "false"
+            if not os.getenv("LANGCHAIN_PROJECT"):
+                project_name = langsmith_config.get("project", "ai-rag-pro")
+                os.environ["LANGCHAIN_PROJECT"] = project_name
+            
+            # 创建LlamaDebugHandler（LlamaIndex的LangSmith集成）
+            # LlamaDebugHandler会自动使用LANGCHAIN环境变量
+            callback_handler = LlamaDebugHandler()
+            callback_manager = CallbackManager([callback_handler])
+            
+            project_name = langsmith_config.get("project", "ai-rag-pro")
+            logging.info(f"✅ LangSmith callback已启用，项目: {project_name}")
+            logging.info(f"📊 查看追踪: https://smith.langchain.com/projects/{project_name}")
+            return callback_manager
+            
+        except ImportError:
+            logging.warning("⚠️ langsmith未安装，请运行: pip install langsmith")
+            logging.info("💡 LangSmith用于追踪和监控LLM调用，安装后可查看详细的调用链和性能指标")
+            return None
+        except Exception as e:
+            logging.warning(f"⚠️ LangSmith callback设置失败: {e}")
+            return None
+            
+    except Exception as e:
+        logging.warning(f"⚠️ LangSmith callback设置异常: {e}")
+        return None
+
+def _apply_langsmith_settings():
+    """
+    应用LangSmith设置到LlamaIndex全局Settings
+    应该在RAGManager初始化之前调用
+    """
+    callback_manager = _setup_langsmith_callback()
+    if callback_manager:
+        Settings.callback_manager = callback_manager
+        logging.info("✅ LangSmith callback已应用到LlamaIndex Settings")
+
 class RAGManager:
     def __init__(self, 
                  knowledge_space_dir: str = None,
@@ -116,6 +185,9 @@ class RAGManager:
         初始化RAG管理器，配置模型和路径。
         如果参数为None，则从配置文件读取。
         """
+        # 首先应用LangSmith设置（如果启用）
+        _apply_langsmith_settings()
+        
         # 加载配置
         config = load_config()
         rag_config = config.get("rag", {})
@@ -299,6 +371,9 @@ class RAGManager:
             error_msg = f"不支持的嵌入模型提供商: {embed_provider}"
             logging.warning(error_msg)
             self.embed_error_msg = error_msg
+        
+        # LangSmith callback已在_apply_langsmith_settings()中设置
+        # 这里只需要确保Settings正确配置
         
         Settings.llm = self.llm
         if self.embed_model is not None:

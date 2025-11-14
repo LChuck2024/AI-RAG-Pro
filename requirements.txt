@@ -21,3 +21,6 @@ unstructured[local-inference] # For parsing complex files like PDFs
 python-dotenv
 pyyaml
 numpy<2  # 限制 NumPy 版本，避免与 llama-index 的 OpenAILike 冲突
+
+# Monitoring & Observability
+langsmith  # LangSmith for LLM tracing and monitoring (optional)

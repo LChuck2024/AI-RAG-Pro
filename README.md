@@ -16,8 +16,10 @@
 - **智能检索**: 支持向量相似度检索，可配置检索参数（TopK、相似度阈值）
 - **思考过程展示**: 可选的思考过程展示，帮助用户理解AI的推理过程
 - **用户反馈系统**: 支持评分、标签和改进建议，持续优化系统
+- **多维度评估指标**: 提供置信度、精确率、召回率、F1分数等评估指标，量化问答质量
 - **多模型支持**: 支持 DeepSeek、OpenAI、Qwen 等多种大模型
 - **流式输出**: 实时流式响应，提升交互体验
+- **LangSmith监控**: 可选的LLM调用追踪和监控，支持性能分析和调试
 
 ## 📁 项目结构
 
@@ -31,6 +33,7 @@ AI-RAG-Pro/
 ├── src/                      # 核心源代码
 │   ├── retriever.py          # RAG检索管理器
 │   ├── feedback.py           # 反馈存储管理
+│   ├── evaluation.py         # 评估指标计算
 │   ├── general_assistant.py  # 通用助手处理
 │   ├── industry_assistant.py # 行业助手处理
 │   ├── llm.py               # LLM服务封装
@@ -64,6 +67,7 @@ AI-RAG-Pro/
 | **关系数据库** | SQLite | 轻量级反馈数据存储 |
 | **LLM** | DeepSeek / OpenAI / Qwen | 支持多种大语言模型 |
 | **Embedding** | DashScope Text Embedding | 中文文本向量化 |
+| **监控** | LangSmith | LLM调用追踪和性能监控（可选） |
 | **Python版本** | Python 3.8+ | 推荐使用 Python 3.10+ |
 
 ## 🚀 快速开始
@@ -93,14 +97,25 @@ pip install -r requirements.txt
     "api_keys": {
         "DEEPSEEK_API_KEY": "your-deepseek-api-key",
         "OPENAI_API_KEY": "your-openai-api-key",
-        "DASHSCOPE_API_KEY": "your-dashscope-api-key"
+        "DASHSCOPE_API_KEY": "your-dashscope-api-key",
+        "LANGCHAIN_API_KEY": "your-langchain-api-key"
     },
     "default_llm": "deepseek",
-    "priority_order": ["deepseek", "openai", "qwen"]
+    "priority_order": ["deepseek", "openai", "qwen"],
+    "monitoring": {
+        "langsmith": {
+            "enabled": false,
+            "project": "ai-rag-pro",
+            "tracing": true
+        }
+    }
 }
 ```
 
-**注意**: 至少需要配置一个可用的API密钥。DashScope API Key 是必需的（用于Embedding模型）。
+**注意**: 
+- 至少需要配置一个可用的LLM API密钥
+- DashScope API Key 是必需的（用于Embedding模型）
+- LangSmith API Key 是可选的（用于LLM调用监控）
 
 ### 4. 准备知识文档
 
@@ -131,7 +146,8 @@ streamlit run 首页.py
 
 3. **启用思考过程**: 勾选"显示思考过程"可查看AI的推理过程
 
-4. **提交反馈**: 对回答进行评分和反馈，帮助系统持续改进
+4. **查看评估指标**: 系统自动计算并展示置信度、精确率、召回率、F1分数等指标
+5. **提交反馈**: 对回答进行评分和反馈，帮助系统持续改进
 
 ### 知识空间管理
 
@@ -178,6 +194,41 @@ streamlit run 首页.py
 }
 ```
 
+### LangSmith监控配置
+
+LangSmith 是 LangChain 提供的 LLM 调用追踪和监控平台，可以帮助你：
+- 追踪每次 LLM 调用
+- 分析性能和成本
+- 调试和优化提示词
+- 监控系统运行状态
+
+配置方法：
+
+1. **获取 LangSmith API Key**:
+   - 访问 [LangSmith](https://smith.langchain.com/)
+   - 注册账号并获取 API Key
+
+2. **配置项目名称**:
+   在 `config/config.json` 的 `monitoring.langsmith.project` 字段中设置你的项目名称：
+   ```json
+   {
+       "monitoring": {
+           "langsmith": {
+               "enabled": true,
+               "project": "your-project-name",
+               "tracing": true
+           }
+       }
+   }
+   ```
+
+3. **启用监控**:
+   - 将 `enabled` 设置为 `true`
+   - 确保已配置 `LANGCHAIN_API_KEY`
+   - 重启应用后即可在 LangSmith 平台查看追踪数据
+
+**查看追踪数据**: 访问 `https://smith.langchain.com/projects/{your-project-name}` 查看详细的调用追踪和性能分析。
+
 ## 🔧 常见问题
 
 ### Q: 如何添加新的知识文档？
@@ -197,6 +248,24 @@ A:
 ### Q: 如何查看反馈数据？
 
 A: 使用"反馈空间"页面可以查看所有反馈，支持筛选、搜索和导出。
+
+### Q: 评估指标是如何计算的？
+
+A: 系统提供多维度评估指标：
+- **置信度（Confidence）**: 基于检索相似度或意图匹配分数计算
+- **精确率（Precision）**: 检索到的相关文档数 / 总检索文档数
+- **召回率（Recall）**: 基于平均相似度或意图匹配分数估算
+- **F1分数**: 精确率和召回率的调和平均数
+
+这些指标可以帮助你量化问答系统的性能和质量。
+
+### Q: 如何配置 LangSmith 监控？
+
+A: 
+1. 在 `config/config.json` 中配置 `LANGCHAIN_API_KEY`
+2. 设置 `monitoring.langsmith.enabled` 为 `true`
+3. 设置 `monitoring.langsmith.project` 为你的项目名称
+4. 重启应用后即可在 LangSmith 平台查看追踪数据
 
 ### Q: 系统要求使用ChromaDB吗？
 
@@ -231,6 +300,7 @@ A: 这通常是由于 NumPy 版本冲突导致的。解决方法：
 
 - `src/retriever.py`: RAG管理器，负责索引创建和检索
 - `src/feedback.py`: 反馈存储，使用SQLite管理反馈数据
+- `src/evaluation.py`: 评估指标计算模块，提供多维度质量评估
 - `src/industry_assistant.py`: 行业助手逻辑，实现意图空间和知识空间的检索
 - `src/general_assistant.py`: 通用助手逻辑，直接调用LLM
 - `src/llm.py`: LLM服务封装，支持多种模型和流式输出
@@ -260,6 +330,7 @@ A: 这通常是由于 NumPy 版本冲突导致的。解决方法：
 - [LlamaIndex](https://www.llamaindex.ai/) - RAG框架
 - [Streamlit](https://streamlit.io/) - Web框架
 - [ChromaDB](https://www.trychroma.com/) - 向量数据库
+- [LangSmith](https://smith.langchain.com/) - LLM监控和追踪平台
 
 ---
 

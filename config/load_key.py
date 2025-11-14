@@ -4,8 +4,12 @@
 """
 import os
 import json
+import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
 
 # 配置文件路径
 CONFIG_FILE = Path(__file__).parent / "config.json"
@@ -172,6 +176,19 @@ def load_key():
             dashscope.api_key = dashscope_api_key
     except ImportError:
         pass
+    
+    # 配置LangSmith（如果启用）
+    monitoring_config = config.get("monitoring", {})
+    langsmith_config = monitoring_config.get("langsmith", {})
+    if langsmith_config.get("enabled", False):
+        langsmith_api_key = get_api_key("LANGCHAIN_API_KEY")
+        if langsmith_api_key:
+            os.environ["LANGCHAIN_API_KEY"] = langsmith_api_key
+            os.environ["LANGCHAIN_TRACING"] = "true" if langsmith_config.get("tracing", True) else "false"
+            os.environ["LANGCHAIN_PROJECT"] = langsmith_config.get("project", "ai-rag-pro")
+            logging.info(f"✅ LangSmith已启用，项目: {langsmith_config.get('project', 'ai-rag-pro')}")
+        else:
+            logging.warning("⚠️ LangSmith已配置但未找到LANGCHAIN_API_KEY，请检查配置")
 
 def update_api_key(key_name: str, key_value: str) -> bool:
     """

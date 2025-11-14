@@ -2,7 +2,8 @@
     "api_keys": {
         "DEEPSEEK_API_KEY": "sk-af11300937c2469789f3813bae56c15e",
         "OPENAI_API_KEY": "",
-        "DASHSCOPE_API_KEY": "sk-280e1ed192f549aa8295dff054d30008"
+        "DASHSCOPE_API_KEY": "sk-280e1ed192f549aa8295dff054d30008",
+        "LANGCHAIN_API_KEY": "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"
     },
     "models": {
         "deepseek": {
@@ -44,5 +45,12 @@
         "default_intent_threshold": 0.85
     },
     "default_llm": "deepseek",
-    "priority_order": ["deepseek", "qwen"]
+    "priority_order": ["deepseek", "qwen"],
+    "monitoring": {
+        "langsmith": {
+            "enabled": false,
+            "project": "ai-rag-pro",
+            "tracing": true
+        }
+    }
 }

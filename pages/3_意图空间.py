@@ -509,7 +509,7 @@ with tab2:
                 "出现次数": fq['count'],
                 "反馈次数": fq.get('feedback_count', 0),
                 "平均评分": avg_rating_display,
-                "最后提问": format_local_time(fq['last_asked']),
+                "最后提问": format_local_time(fq['last_asked'], include_seconds=True),
                 "完整问题": fq['question']
             })
         
@@ -568,7 +568,7 @@ with tab2:
                 st.metric("平均评分", avg_rating_display)
             with col2:
                 st.markdown("#### 📅 时间信息")
-                st.markdown(f"**最后提问时间**: {format_local_time(selected_fq['last_asked'])}")
+                st.markdown(f"**最后提问时间**: {format_local_time(selected_fq['last_asked'], include_seconds=True)}")
             
             st.markdown("#### ❓ 问题内容")
             st.markdown(f"""
@@ -632,7 +632,7 @@ with tab3:
                 "答案": answer_short,
                 "评分": qa['rating'],
                 "改进": correction_indicator,
-                "时间": format_local_time(qa['created_at']),
+                "时间": format_local_time(qa['created_at'], include_seconds=True),
                 "完整问题": qa['question'],
                 "完整答案": qa['answer'],
                 "原始答案": qa.get('original_answer', ''),
@@ -702,7 +702,7 @@ with tab3:
                     "反馈ID": selected_qa['id'],
                     "评分": f"{selected_qa['rating']}/5",
                     "有改进建议": "是" if selected_qa['has_correction'] else "否",
-                    "时间": format_local_time(selected_qa['created_at'])
+                    "时间": format_local_time(selected_qa['created_at'], include_seconds=True)
                 }
                 for key, value in info_data.items():
                     st.markdown(f"**{key}**: {value}")

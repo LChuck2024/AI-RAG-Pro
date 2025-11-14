@@ -2,7 +2,7 @@ import os
 import sqlite3
 import logging
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Iterator
 from llama_index.core.schema import Document
 
@@ -135,7 +135,9 @@ class FeedbackStore:
             int: 插入的记录ID
         """
         # 使用本地时间（上海时间 UTC+8）
-        local_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # 确保时间格式一致：YYYY-MM-DD HH:MM:SS
+        local_tz = timezone(timedelta(hours=8))  # 上海时间 UTC+8
+        local_time = datetime.now(local_tz).strftime("%Y-%m-%d %H:%M:%S")
         with self._get_db_connection() as conn:
             cur = conn.cursor()
             cur.execute(

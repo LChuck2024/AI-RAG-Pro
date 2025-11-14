@@ -1,0 +1,23 @@
+# Core RAG framework
+llama-index
+
+# LlamaIndex Integrations
+llama-index-llms-openai
+llama-index-embeddings-huggingface
+llama-index-embeddings-dashscope
+llama-index-vector-stores-chroma
+llama-index-readers-file
+
+# Web UI
+streamlit
+pandas
+
+# Foundational Libraries
+openai
+dashscope
+chromadb
+sentence-transformers
+unstructured[local-inference] # For parsing complex files like PDFs
+python-dotenv
+pyyaml
+numpy<2  # 限制 NumPy 版本，避免与 llama-index 的 OpenAILike 冲突

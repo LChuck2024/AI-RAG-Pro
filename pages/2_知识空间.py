@@ -205,7 +205,7 @@ with st.sidebar:
     
     # 操作按钮
     st.markdown("### 🛠️ 操作")
-    if st.button("🔄 刷新数据", use_container_width=True):
+    if st.button("🔄 刷新数据", width='stretch'):
         # 清除缓存
         st.cache_data.clear()
         st.rerun()
@@ -285,7 +285,7 @@ else:
         # 使用st.dataframe展示表格
         selected_rows = st.dataframe(
             df_display,
-            use_container_width=True,
+            width='stretch',
             height=600,
             hide_index=True,
             column_config={

@@ -371,11 +371,11 @@ with st.sidebar:
     st.markdown("### 🛠️ 管理功能")
     col1, col2, col3 = st.columns(3)
     with col1:
-        clear_chat = st.button("🗑️ 清空会话", use_container_width=True)
+        clear_chat = st.button("🗑️ 清空会话", width='stretch')
     with col2:
-        export_chat = st.button("📥 导出对话", use_container_width=True)
+        export_chat = st.button("📥 导出对话", width='stretch')
     with col3:
-        clear_cache = st.button("🔄 清除缓存", use_container_width=True, help="清除 RAG 管理器缓存，强制重新加载配置")
+        clear_cache = st.button("🔄 清除缓存", width='stretch', help="清除 RAG 管理器缓存，强制重新加载配置")
     
     st.markdown("---")
     
@@ -498,7 +498,7 @@ for idx, message in enumerate(st.session_state.messages):
                             if st.button(
                                 label,
                                 key=f"star_{i}_{idx}",
-                                use_container_width=True,
+                                width='stretch',
                                 type="primary" if stars == i else "secondary"
                             ):
                                 st.session_state[feedback_key]["stars"] = i
@@ -526,7 +526,7 @@ for idx, message in enumerate(st.session_state.messages):
                     )
                     st.session_state[feedback_key]["correction"] = correction
                     
-                    if st.button("提交反馈", use_container_width=True, key=f"submit_feedback_{idx}"):
+                    if st.button("提交反馈", width='stretch', key=f"submit_feedback_{idx}"):
                         rating = stars  # 使用用户选择的评分（0-5）
                         # 获取对应的用户问题
                         user_question = st.session_state.messages[idx - 1]["content"] if idx > 0 else ""
@@ -800,7 +800,7 @@ if prompt := st.chat_input("请在这里输入您的问题..."):
                             if st.button(
                                 label,
                                 key=f"star_{i}_{current_msg_idx}",
-                                use_container_width=True,
+                                width='stretch',
                                 type="primary" if stars == i else "secondary"
                             ):
                                 st.session_state[feedback_key]["stars"] = i
@@ -828,7 +828,7 @@ if prompt := st.chat_input("请在这里输入您的问题..."):
                     )
                     st.session_state[feedback_key]["correction"] = correction
                     
-                    if st.button("提交反馈", use_container_width=True, key=f"submit_feedback_{current_msg_idx}"):
+                    if st.button("提交反馈", width='stretch', key=f"submit_feedback_{current_msg_idx}"):
                         rating = stars  # 使用用户选择的评分（0-5）
                         # 更新已存在的交互记录的反馈信息
                         interaction_id = st.session_state[feedback_key].get("interaction_id")

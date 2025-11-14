@@ -668,7 +668,7 @@ for idx, (col, (icon, title, desc, page)) in enumerate(zip([nav_col1, nav_col2, 
             <div class="nav-arrow">→</div>
         </div>
         """, unsafe_allow_html=True)
-        if st.button(f"进入{title}", use_container_width=True, type="primary", key=f"nav_{idx}"):
+        if st.button(f"进入{title}", width='stretch', type="primary", key=f"nav_{idx}"):
             st.switch_page(page)
 
 # --- 核心特性 ---

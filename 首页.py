@@ -2,9 +2,29 @@
 AI RAG Pro 启动与配置脚本
 """
 import streamlit as st
+import nltk
+import os
+
+# --------------------------------------------------------------------------
+# [重要] 修复Streamlit Cloud部署时的NLTK PermissionError
+# 通过将NLTK的数据路径指向项目内部的文件夹，避免在只读环境中下载数据
+# --------------------------------------------------------------------------
+# 获取当前文件所在目录的绝对路径
+_this_file_dir = os.path.dirname(os.path.abspath(__file__))
+# 构造项目内部的nltk_data文件夹路径
+_nltk_data_dir = os.path.join(_this_file_dir, "nltk_data")
+
+# 检查路径是否存在，如果不存在则创建（主要用于本地环境）
+if not os.path.exists(_nltk_data_dir):
+    os.makedirs(_nltk_data_dir)
+
+# 将我们自定义的路径添加到NLTK的搜索列表中
+if _nltk_data_dir not in nltk.data.path:
+    nltk.data.path.append(_nltk_data_dir)
+# --------------------------------------------------------------------------
+
 import streamlit.components.v1 as components
 import sys
-import os
 from pathlib import Path
 import logging
 

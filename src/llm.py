@@ -31,6 +31,7 @@ class LLMService:
         """初始化LLM客户端"""
         self.client = None
         self.model_name = None
+        self.provider = None
         self._init_client()
     
     def _init_client(self) -> None:
@@ -47,11 +48,13 @@ class LLMService:
                 base_url="https://api.deepseek.com/v1"
             )
             self.model_name = "deepseek-chat"
+            self.provider = "deepseek"
             logging.info("使用 DeepSeek API")
         elif openai_api_key:
             # 使用 OpenAI API
             self.client = OpenAI(api_key=openai_api_key)
             self.model_name = "gpt-3.5-turbo"
+            self.provider = "openai"
             logging.info("使用 OpenAI API")
         elif dashscope_api_key:
             # 使用 DashScope (Qwen) API
@@ -60,11 +63,13 @@ class LLMService:
                 base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
             )
             self.model_name = "qwen-plus"
+            self.provider = "qwen"
             logging.info("使用 DashScope (Qwen) API")
         else:
             logging.warning("未找到可用的 API 密钥")
             self.client = None
             self.model_name = None
+            self.provider = None
     
     def is_available(self) -> bool:
         """检查LLM服务是否可用"""

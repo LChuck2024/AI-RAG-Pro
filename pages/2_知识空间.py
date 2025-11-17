@@ -15,14 +15,6 @@ setup_project_path()
 
 from config.load_key import load_config
 
-# --- 页面配置 ---
-st.set_page_config(
-    page_title="知识空间 - AI RAG Pro",
-    page_icon="📚",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
 # 自定义CSS
 st.markdown("""
 <style>
@@ -98,14 +90,6 @@ st.markdown("""
     .stDataFrame {
         border-radius: 12px;
         overflow: hidden;
-    }
-    
-    /* 标题样式 */
-    h1 {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
     }
     
     /* 统计指标样式 */
@@ -205,7 +189,7 @@ with st.sidebar:
     
     # 操作按钮
     st.markdown("### 🛠️ 操作")
-    if st.button("🔄 刷新数据", width='stretch'):
+    if st.button("🔄 刷新数据", use_container_width=True):
         # 清除缓存
         st.cache_data.clear()
         st.rerun()
@@ -285,7 +269,7 @@ else:
         # 使用st.dataframe展示表格
         selected_rows = st.dataframe(
             df_display,
-            width='stretch',
+            use_container_width=True,
             height=600,
             hide_index=True,
             column_config={

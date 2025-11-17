@@ -248,11 +248,13 @@ class RAGManager:
         # 初始化错误信息存储（必须在 LLM 初始化之前）
         self.llm_error_msg = None  # 存储 LLM 初始化错误信息
         self.embed_error_msg = None  # 存储嵌入模型初始化错误信息
-        
+        self.llm_provider = None  # 用于存储 'deepseek', 'qwen' 等
+
         # 配置全局的LLM和Embedding模型
         # 从配置文件获取可用的LLM
         available_llm = get_available_llm()
         if available_llm:
+            self.llm_provider = available_llm  # 存储提供商名称
             model_config = get_model_config(available_llm)
             if model_config:
                 api_key = get_api_key(model_config["api_key_env"])

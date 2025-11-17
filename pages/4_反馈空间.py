@@ -16,14 +16,6 @@ setup_project_path()
 
 from src.feedback import FeedbackStore
 
-# --- 页面配置 ---
-st.set_page_config(
-    page_title="反馈空间 - AI RAG Pro",
-    page_icon="💬",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
 # 自定义CSS
 st.markdown("""
 <style>
@@ -131,14 +123,6 @@ st.markdown("""
     .stDataFrame {
         border-radius: 12px;
         overflow: hidden;
-    }
-    
-    /* 标题样式 */
-    h1 {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
     }
     
     /* 问题框样式 */
@@ -257,7 +241,7 @@ with st.sidebar:
     
     # 操作按钮
     st.markdown("### 🛠️ 操作")
-    if st.button("🔄 刷新数据", width='stretch'):
+    if st.button("🔄 刷新数据", use_container_width=True):
         # 清除缓存
         st.cache_data.clear()
         st.rerun()
@@ -265,7 +249,7 @@ with st.sidebar:
     # 自动刷新提示
     st.caption("💡 数据每3秒自动更新，或点击刷新按钮立即更新")
     
-    if st.button("📥 导出数据", width='stretch'):
+    if st.button("📥 导出数据", use_container_width=True):
         # 导出功能
         all_feedback = feedback_store.get_all_feedback(rating_filter=rating_value)
         if all_feedback:
@@ -377,7 +361,7 @@ else:
     
     selected_rows = st.dataframe(
         df_display,
-        width='stretch',
+        use_container_width=True,
         height=600,
         hide_index=True,
         column_config={
@@ -442,7 +426,7 @@ else:
             
             with col2:
                 st.markdown("#### 🗑️ 操作")
-                if st.button("删除此反馈", key=f"delete_detail_{selected_id}", type="primary", width='stretch'):
+                if st.button("删除此反馈", key=f"delete_detail_{selected_id}", type="primary", use_container_width=True):
                     if feedback_store.delete_feedback(selected_id):
                         st.success("✅ 反馈已删除")
                         st.rerun()

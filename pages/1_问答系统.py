@@ -14,53 +14,12 @@ from src.general_assistant import handle_general_assistant
 from src.industry_assistant import handle_industry_assistant
 from src.evaluation import calculate_metrics, format_metrics_display
 from config.load_key import load_key
-
-# 缓存RAG管理器实例
-@st.cache_resource
-def load_rag_manager(_cache_key=None):
-    """
-    加载RAG管理器
-    使用缓存键确保配置改变时重新加载
-    """
-    # 检查必要的模块是否已安装
-    try:
-        import llama_index
-    except ImportError:
-        raise ImportError(
-            "未安装 llama_index 模块。\n"
-            "请运行: pip install llama-index llama-index-embeddings-dashscope\n"
-            "或激活正确的 conda 环境（如 llamaindex_310）"
-        )
-    
-    try:
-        from llama_index.embeddings.dashscope import DashScopeEmbedding
-    except ImportError:
-        raise ImportError(
-            "未安装 llama-index-embeddings-dashscope 模块。\n"
-            "请运行: pip install llama-index-embeddings-dashscope"
-        )
-    
-    return RAGManager()
-
-def get_rag_manager_cache_key():
-    """生成缓存键，基于配置文件的修改时间"""
-    import os
-    from pathlib import Path
-    config_file = Path(__file__).parent.parent / "config" / "config.json"
-    if config_file.exists():
-        return str(config_file.stat().st_mtime)
-    return "default"
+from src.llm import get_llm_service
+from 首页 import load_rag_manager, get_rag_manager_cache_key
 
 # 加载配置文件中的API密钥到环境变量
+from config.load_key import load_key
 load_key()
-
-# --- 页面配置 ---
-st.set_page_config(
-    page_title="AI RAG Pro 问答系统",
-    page_icon="🤖",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # 自定义CSS，美化界面
 st.markdown("""
@@ -128,25 +87,6 @@ st.markdown("""
     .stButton > button:hover {
         transform: translateY(-2px);
         box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
-    }
-    
-    /* 标题样式 */
-    h1 {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        font-weight: 600;
-        text-align: center;
-        margin-bottom: 1rem;
-    }
-    
-    /* 副标题样式 */
-    .stCaption {
-        text-align: center;
-        color: #5a6c7d;
-        font-size: 0.9rem;
-        margin-bottom: 2rem;
     }
     
     /* 侧边栏样式 */
@@ -371,11 +311,11 @@ with st.sidebar:
     st.markdown("### 🛠️ 管理功能")
     col1, col2, col3 = st.columns(3)
     with col1:
-        clear_chat = st.button("🗑️ 清空会话", width='stretch')
+        clear_chat = st.button("🗑️ 清空会话", use_container_width=True)
     with col2:
-        export_chat = st.button("📥 导出对话", width='stretch')
+        export_chat = st.button("📥 导出对话", use_container_width=True)
     with col3:
-        clear_cache = st.button("🔄 清除缓存", width='stretch', help="清除 RAG 管理器缓存，强制重新加载配置")
+        clear_cache = st.button("🔄 清除缓存", use_container_width=True, help="清除 RAG 管理器缓存，强制重新加载配置")
     
     st.markdown("---")
     
@@ -414,9 +354,28 @@ if export_chat:
     )
 
 
+# --- 获取当前使用的LLM提供商 ---
+llm_provider_name = ""
+try:
+    if rag_enabled:
+        # 行业助手模式
+        cache_key = get_rag_manager_cache_key()
+        rag_manager = load_rag_manager(_cache_key=cache_key)
+        if rag_manager and hasattr(rag_manager, 'llm_provider') and rag_manager.llm_provider:
+            llm_provider_name = rag_manager.llm_provider
+    else:
+        # 通用助手模式
+        llm_service = get_llm_service()
+        if llm_service and hasattr(llm_service, 'provider') and llm_service.provider:
+            llm_provider_name = llm_service.provider
+except Exception as e:
+    logging.warning(f"无法获取LLM提供商名称: {e}")
+
 # 主要内容区域
 # 根据助手模式动态显示描述
-subtitle_text = "基于知识库的智能问答助手" if rag_enabled else "通用智能问答助手"
+subtitle_base = "基于知识库的智能问答助手" if rag_enabled else "通用智能问答助手"
+subtitle_text = f"{subtitle_base} (模型: {llm_provider_name})" if llm_provider_name else subtitle_base
+
 st.markdown(f"""
 <div class='chat-container'>
     <div style='text-align: center; margin-bottom: 1.5rem;'>
@@ -498,7 +457,7 @@ for idx, message in enumerate(st.session_state.messages):
                             if st.button(
                                 label,
                                 key=f"star_{i}_{idx}",
-                                width='stretch',
+                                use_container_width=True,
                                 type="primary" if stars == i else "secondary"
                             ):
                                 st.session_state[feedback_key]["stars"] = i
@@ -526,7 +485,7 @@ for idx, message in enumerate(st.session_state.messages):
                     )
                     st.session_state[feedback_key]["correction"] = correction
                     
-                    if st.button("提交反馈", width='stretch', key=f"submit_feedback_{idx}"):
+                    if st.button("提交反馈", use_container_width=True, key=f"submit_feedback_{idx}"):
                         rating = stars  # 使用用户选择的评分（0-5）
                         # 获取对应的用户问题
                         user_question = st.session_state.messages[idx - 1]["content"] if idx > 0 else ""
@@ -800,7 +759,7 @@ if prompt := st.chat_input("请在这里输入您的问题..."):
                             if st.button(
                                 label,
                                 key=f"star_{i}_{current_msg_idx}",
-                                width='stretch',
+                                use_container_width=True,
                                 type="primary" if stars == i else "secondary"
                             ):
                                 st.session_state[feedback_key]["stars"] = i
@@ -828,7 +787,7 @@ if prompt := st.chat_input("请在这里输入您的问题..."):
                     )
                     st.session_state[feedback_key]["correction"] = correction
                     
-                    if st.button("提交反馈", width='stretch', key=f"submit_feedback_{current_msg_idx}"):
+                    if st.button("提交反馈", use_container_width=True, key=f"submit_feedback_{current_msg_idx}"):
                         rating = stars  # 使用用户选择的评分（0-5）
                         # 更新已存在的交互记录的反馈信息
                         interaction_id = st.session_state[feedback_key].get("interaction_id")

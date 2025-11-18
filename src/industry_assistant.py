@@ -120,6 +120,9 @@ def _query_intent_space(
     """
     查询意图空间
     
+    注意：意图空间中的答案存储在 Document.metadata["answer"] 中，
+    应该直接从检索结果中获取，而不是使用 LLM 生成。
+    
     Returns:
         Tuple[str, float, list]: (intent_text, intent_score, intent_src_nodes)
     """
@@ -133,28 +136,41 @@ def _query_intent_space(
         return intent_text, intent_score, intent_src_nodes
     
     try:
-        intent_engine = rag_manager.get_intent_query_engine(
-            streaming=False, 
-            similarity_top_k=k_intent, 
-            show_thinking=show_thinking
-        )
-        intent_response = intent_engine.query(prompt)
+        # 使用检索器直接检索，而不是使用查询引擎（避免调用 LLM）
+        # 这样可以获取原始文档和相似度分数
+        retriever = rag_manager.intent_index.as_retriever(similarity_top_k=k_intent)
+        intent_src_nodes = retriever.retrieve(prompt)
         
-        # 获取响应文本
-        if hasattr(intent_response, "response"):
-            intent_text = str(intent_response.response)
-        elif hasattr(intent_response, "get_response"):
-            intent_text = str(intent_response.get_response())
-        else:
-            intent_text = str(intent_response)
-        
-        intent_src_nodes = getattr(intent_response, "source_nodes", [])
         if intent_src_nodes:
-            top = intent_src_nodes[0]
-            intent_score = getattr(top, "score", 0.0) or 0.0
+            # 获取相似度分数最高的节点
+            top_node = intent_src_nodes[0]
+            intent_score = getattr(top_node, "score", 0.0) or 0.0
+            
+            # 从 metadata 中获取答案
+            # 意图空间中的答案存储在 metadata["answer"] 中
+            # 使用与其他地方一致的访问方式：n.node.metadata
+            if hasattr(top_node, "node") and hasattr(top_node.node, "metadata"):
+                node_metadata = top_node.node.metadata
+                if isinstance(node_metadata, dict) and "answer" in node_metadata:
+                    intent_text = str(node_metadata["answer"]).strip()
+                    logger.info(f"从意图空间检索到答案: score={intent_score}, answer_length={len(intent_text)}")
+                else:
+                    # 如果没有找到 answer，尝试从 node.text 获取（兼容旧数据）
+                    if hasattr(top_node.node, "text"):
+                        intent_text = str(top_node.node.text).strip()
+                        logger.warning(f"意图空间节点缺少 answer metadata，使用 text: {intent_text[:50]}...")
+                    else:
+                        logger.warning(f"意图空间节点缺少答案信息: metadata={node_metadata}")
+            else:
+                logger.warning(f"意图空间节点结构异常: top_node={type(top_node)}")
+        else:
+            logger.info("意图空间未检索到相关节点")
+            
     except Exception as e:
         logger.warning(f"意图空间查询失败: {e}", exc_info=True)
         intent_text = ""
+        intent_score = 0.0
+        intent_src_nodes = []
     
     return intent_text, intent_score, intent_src_nodes
 
@@ -353,7 +369,14 @@ def handle_industry_assistant(
         intent_text, intent_score, intent_src_nodes = _query_intent_space(
             rag_manager, prompt, k_intent, intent_threshold, show_thinking
         )
-        logger.info(f"意图空间查询完成: score={intent_score}, has_text={len(intent_text) > 0}")
+        logger.info(f"意图空间查询完成: score={intent_score:.4f}, threshold={intent_threshold}, has_text={len(intent_text) > 0}")
+        
+        # 如果检索到了节点但分数低于阈值，记录详细信息用于调试
+        if intent_src_nodes and intent_score < intent_threshold:
+            top_node = intent_src_nodes[0]
+            if hasattr(top_node, "node") and hasattr(top_node.node, "text"):
+                matched_question = top_node.node.text[:100] if hasattr(top_node.node, "text") else "N/A"
+                logger.info(f"意图匹配失败: 用户问题='{prompt[:50]}...', 匹配问题='{matched_question}...', 相似度={intent_score:.4f} < 阈值={intent_threshold}")
     except Exception as e:
         logger.error(f"意图空间查询异常: {e}", exc_info=True)
         intent_text = ""

@@ -328,6 +328,8 @@ with st.sidebar:
     with col3:
         clear_cache = st.button("🔄 清除缓存", use_container_width=True, help="清除 RAG 管理器缓存，强制重新加载配置")
     
+    reset_db = st.button("💥 重置向量库", use_container_width=True, help="[危险] 删除并重建整个向量数据库，用于解决索引配置错误等疑难问题。")
+    
     st.markdown("---")
     
     # 使用提示
@@ -352,6 +354,23 @@ if clear_chat:
 if clear_cache:
     load_rag_manager.clear()
     st.success("✅ 缓存已清除，RAG 管理器将重新加载")
+    st.rerun()
+
+if reset_db:
+    with st.spinner("正在重置向量数据库..."):
+        try:
+            cache_key = get_rag_manager_cache_key()
+            rag_manager = load_rag_manager(_cache_key=cache_key)
+            if rag_manager:
+                result = rag_manager.reset_vector_db()
+                st.success(f"✅ {result}")
+                # 重置后需要清除缓存并重新加载 RAG 管理器
+                load_rag_manager.clear()
+                st.info("向量库重置成功，请刷新知识空间和意图空间索引。")
+            else:
+                st.error("❌ RAG管理器加载失败，无法重置。")
+        except Exception as e:
+            st.error(f"❌ 重置向量数据库时出错: {e}")
     st.rerun()
 
 if export_chat:
@@ -725,7 +744,10 @@ if prompt := st.chat_input("请在这里输入您的问题..."):
                         st.markdown("---")
                         st.markdown("##### 📚 来源文档")
                         for i, n in enumerate(src_nodes, 1):
-                            file_name = os.path.basename(n.node.metadata.get("file_path", "未知来源"))
+                            # [关键修复] 兼容 file_name 和 file_path 两种元数据键
+                            metadata = n.node.metadata or {}
+                            file_name_raw = metadata.get("file_name", metadata.get("file_path", "未知来源"))
+                            file_name = os.path.basename(file_name_raw)
                             score = n.score
                             st.caption(f"**{i}. {file_name}** (相似度: {score:.3f})")
 

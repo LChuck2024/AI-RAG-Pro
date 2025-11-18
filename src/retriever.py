@@ -488,7 +488,8 @@ class RAGManager:
                     collection_name="intent_space"
                 )
                 logging.info("✅ 意图空间索引加载完成")
-                self.refresh_intent_index()
+                # [关键修复] 移除此处的刷新调用，避免在初始化时进行二次删除
+                # self.refresh_intent_index() 
             except Exception as e:
                 error_msg = f"索引加载失败: {str(e)}"
                 logging.error(error_msg, exc_info=True)
@@ -529,23 +530,42 @@ class RAGManager:
     def _load_or_create_index_chroma(self, documents_dir: str, collection_name: str) -> VectorStoreIndex:
         """使用 Chroma 向量数据库加载或创建索引"""
         try:
-            # 获取或创建 Chroma collection
+            force_recreate = False
+            # 检查现有 collection 的元数据
             try:
                 chroma_collection = self.chroma_client.get_collection(name=collection_name)
-                logging.info(f"使用现有 Chroma collection: {collection_name} (已有 {chroma_collection.count()} 条数据)")
+                # 更安全的元数据检查
+                collection_metadata = getattr(chroma_collection, "metadata", None)
+                
+                # 如果没有元数据或距离度量不正确，则强制重建
+                if not collection_metadata or collection_metadata.get("hnsw:space") != "cosine":
+                    logging.warning(
+                        f"检测到 Chroma collection '{collection_name}' 元数据缺失或使用了错误的距离度量，将强制重建。"
+                    )
+                    force_recreate = True
+                    # 删除错误的 collection
+                    self.chroma_client.delete_collection(name=collection_name)
+                    # 重新创建
+                    chroma_collection = self.chroma_client.create_collection(
+                        name=collection_name,
+                        metadata={"hnsw:space": "cosine"}
+                    )
+                else:
+                    logging.info(f"使用现有 Chroma collection: {collection_name} (已有 {chroma_collection.count()} 条数据)")
             except Exception:
-                # Collection 不存在，创建新的（Chroma会抛出异常，具体类型可能因版本而异）
-                chroma_collection = self.chroma_client.create_collection(name=collection_name)
-                logging.info(f"创建新 Chroma collection: {collection_name}")
-            
-            # 创建 ChromaVectorStore
+                # Collection 不存在，需要创建
+                chroma_collection = self.chroma_client.create_collection(
+                    name=collection_name,
+                    metadata={"hnsw:space": "cosine"}  # 指定使用余弦相似度
+                )
+                logging.info(f"创建新 Chroma collection: {collection_name} (使用 cosine 相似度)")
+
+            # 创建 ChromaVectorStore 和 StorageContext
             vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
-            
-            # 创建存储上下文
             storage_context = StorageContext.from_defaults(vector_store=vector_store)
-            
-            # 如果 collection 已有数据，从向量存储加载索引
-            if chroma_collection.count() > 0:
+
+            # 如果 collection 已有数据且不需要强制重建，从向量存储加载索引
+            if chroma_collection.count() > 0 and not force_recreate:
                 logging.info(f"从 Chroma collection '{collection_name}' 加载索引...")
                 index = VectorStoreIndex.from_vector_store(
                     vector_store=vector_store,
@@ -553,27 +573,31 @@ class RAGManager:
                 )
                 logging.info("索引加载完成（Chroma）。")
                 return index
-            
+
             # 创建新索引
+            nodes = []
             if not os.path.exists(documents_dir) or not os.listdir(documents_dir):
                 logging.warning(f"文档目录 '{documents_dir}' 为空或不存在，将创建一个空的索引。")
-                from llama_index.core.schema import Document
-                documents = [Document(text="这是一个空的占位文档。")]
+                from llama_index.core.schema import TextNode
+                nodes = [TextNode(text="这是一个空的占位文档。")]
             else:
                 logging.info(f"从 '{documents_dir}' 加载文档并创建新索引（Chroma）...")
-                # --- [核心修改] ---
                 # 根据collection_name选择不同的文档加载方式
                 if collection_name == "intent_space":
-                    logging.info("使用Q&A解析器加载意图空间文档...")
-                    documents = self._load_qa_documents(documents_dir)
+                    logging.info("使用Q&A解析器直接加载意图节点...")
+                    nodes = self._load_qa_documents(documents_dir)
                 else:
                     logging.info("使用默认解析器加载知识空间文档...")
                     reader = SimpleDirectoryReader(documents_dir)
                     documents = reader.load_data()
-            
-            # 使用 Chroma 向量存储创建索引
-            index = VectorStoreIndex.from_documents(
-                documents,
+                    # 从文档创建节点
+                    from llama_index.core.node_parser import SimpleNodeParser
+                    parser = SimpleNodeParser.from_defaults()
+                    nodes = parser.get_nodes_from_documents(documents)
+
+            # 使用 Chroma 向量存储和准备好的节点创建索引
+            index = VectorStoreIndex(
+                nodes,
                 storage_context=storage_context,
                 embed_model=self.embed_model
             )
@@ -587,13 +611,13 @@ class RAGManager:
     
     def _load_qa_documents(self, directory: str) -> list:
         """
-        从目录加载Q&A格式的文档。
-        每个Q&A对被解析为一个独立的Document对象，其中text是问题，metadata包含答案。
+        从目录加载Q&A格式的文档，并直接创建为 TextNode 对象。
+        每个Q&A对被解析为一个独立的TextNode对象，其中text是问题，metadata包含答案。
         """
-        from llama_index.core.schema import Document
+        from llama_index.core.schema import TextNode
         import re
-        
-        qa_documents = []
+
+        qa_nodes = []
         if not os.path.exists(directory):
             logging.warning(f"意图空间目录不存在: {directory}")
             return []
@@ -604,35 +628,46 @@ class RAGManager:
                 try:
                     with open(filepath, 'r', encoding='utf-8') as f:
                         content = f.read()
-                    
+
                     # 使用正则表达式查找所有Q&A对
-                    # (?=\nQ:|\Z) 是一个正向先行断言，用于处理文件末尾的最后一个A
                     qa_pairs = re.findall(r'Q:\s*(.*?)\s*A:\s*(.*?)(?=\nQ:|\Z)', content, re.DOTALL)
-                    
+
                     for q, a in qa_pairs:
                         question = q.strip()
                         answer = a.strip()
                         if not question:
                             continue
-                        # 文档的text是问题，将被向量化
-                        # 答案存储在元数据中，以便后续检索
-                        doc = Document(
+                        # 直接创建 TextNode，确保只有问题被向量化
+                        node = TextNode(
                             text=question,
                             metadata={
                                 "answer": answer,
                                 "file_name": filename
-                            }
+                            },
+                            # [最终修复] 确保 file_name 不参与向量化，以获得最纯净的相似度分数
+                            excluded_embed_metadata_keys=['answer', 'file_name'],
+                            excluded_llm_metadata_keys=['answer', 'file_name']
                         )
-                        qa_documents.append(doc)
-                    logging.info(f"从 {filename} 加载了 {len(qa_pairs)} 个Q&A对")
+                        # 清理元数据，移除 LlamaIndex 内部可能导致冲突的键
+                        # 确保从向量数据库中取回时，node.text 不会被意外覆盖
+                        if "_node_content" in node.metadata:
+                            del node.metadata["_node_content"]
+                        
+                        qa_nodes.append(node)
+                    logging.info(f"从 {filename} 加载并创建了 {len(qa_pairs)} 个意图节点")
                 except Exception as e:
                     logging.error(f"解析Q&A文件失败: {filepath}, 错误: {e}")
 
-        if not qa_documents:
-            logging.warning(f"在 '{directory}' 中未找到任何Q&A对，将创建一个空的占位文档。")
-            qa_documents.append(Document(text="这是一个空的占位问题。", metadata={"answer": "这是一个空的占位回答。"}))
-            
-        return qa_documents
+        if not qa_nodes:
+            logging.warning(f"在 '{directory}' 中未找到任何Q&A对，将创建一个空的占位节点。")
+            qa_nodes.append(TextNode(
+                text="这是一个空的占位问题。",
+                metadata={"answer": "这是一个空的占位回答。", "file_name": "placeholder"},
+                excluded_embed_metadata_keys=['answer', 'file_name'],
+                excluded_llm_metadata_keys=['answer', 'file_name']
+            ))
+
+        return qa_nodes
 
     def _load_or_create_index_json(self, documents_dir: str, persist_dir: str) -> VectorStoreIndex:
         """
@@ -817,16 +852,29 @@ class RAGManager:
             return
         
         # --- [核心修改] ---
-        # 使用新的Q&A解析器加载文档
-        docs = self._load_qa_documents(self.intent_space_dir)
-        
+        # 使用新的Q&A解析器直接加载为节点
+        nodes = self._load_qa_documents(self.intent_space_dir)
+
         # 将反馈空间中的优质文档也加入意图空间
+        # get_positive_documents 返回的也是 Document，需要转换为 Node
         positive_feedback_docs = self.feedback_store.get_positive_documents()
         if positive_feedback_docs:
-            docs.extend(positive_feedback_docs)
-            logging.info(f"从反馈空间加载了 {len(positive_feedback_docs)} 个优质回答到意图空间")
+            from llama_index.core.schema import TextNode
+            for doc in positive_feedback_docs:
+                # 确保从反馈空间加载的节点也排除元数据
+                # 文件名通常在 doc.metadata['file_name'] 中
+                metadata_keys = list(doc.metadata.keys())
+                nodes.append(
+                    TextNode(
+                        text=doc.text,
+                        metadata=doc.metadata,
+                        excluded_embed_metadata_keys=metadata_keys,
+                        excluded_llm_metadata_keys=metadata_keys
+                    )
+                )
+            logging.info(f"从反馈空间加载并转换了 {len(positive_feedback_docs)} 个优质回答到意图节点")
 
-        if not docs:
+        if not nodes:
             logging.warning("没有可用于刷新意图索引的文档，操作中止。")
             # 如果没有文档，我们可以选择清空索引或保持原样。这里选择保持原样。
             return
@@ -836,22 +884,27 @@ class RAGManager:
             raise RuntimeError("系统要求使用 Chroma 向量存储，但 Chroma 未正确初始化。请检查配置。")
         
         try:
-            # 删除现有 collection（如果存在）
+            # 增强删除逻辑：确保 collection 被删除
             try:
-                self.chroma_client.delete_collection(name="intent_space")
-                logging.info("已删除现有 intent_space collection")
+                # 检查集合是否存在
+                if self.chroma_client.get_collection(name="intent_space"):
+                    self.chroma_client.delete_collection(name="intent_space")
+                    logging.info("已删除现有 intent_space collection")
             except Exception:
-                # Collection 不存在，继续创建
-                pass
-            
+                # 集合不存在或删除失败，可以继续
+                logging.info("intent_space collection 不存在，将创建新的。")
+
             # 创建新的 collection
-            chroma_collection = self.chroma_client.create_collection(name="intent_space")
+            chroma_collection = self.chroma_client.create_collection(
+                name="intent_space",
+                metadata={"hnsw:space": "cosine"}  # 指定使用余弦相似度
+            )
             
             vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
             storage_context = StorageContext.from_defaults(vector_store=vector_store)
-            
-            self.intent_index = VectorStoreIndex.from_documents(
-                docs,
+
+            self.intent_index = VectorStoreIndex(
+                nodes,
                 storage_context=storage_context,
                 embed_model=self.embed_model
             )
@@ -875,28 +928,36 @@ class RAGManager:
         if len(docs) == 0:
             from llama_index.core.schema import Document
             docs = [Document(text="")]
-        
+
+        # 从文档创建节点
+        from llama_index.core.node_parser import SimpleNodeParser
+        parser = SimpleNodeParser.from_defaults()
+        nodes = parser.get_nodes_from_documents(docs)
+
         # 使用 Chroma 向量存储（系统要求）
         if not self.use_chroma or self.chroma_client is None:
             raise RuntimeError("系统要求使用 Chroma 向量存储，但 Chroma 未正确初始化。请检查配置。")
         
         try:
-            # 删除现有 collection（如果存在）
+            # 增强删除逻辑：确保 collection 被删除
             try:
-                self.chroma_client.delete_collection(name="knowledge_space")
-                logging.info("已删除现有 knowledge_space collection")
+                if self.chroma_client.get_collection(name="knowledge_space"):
+                    self.chroma_client.delete_collection(name="knowledge_space")
+                    logging.info("已删除现有 knowledge_space collection")
             except Exception:
-                # Collection 不存在，继续创建
-                pass
-            
+                logging.info("knowledge_space collection 不存在，将创建新的。")
+
             # 创建新的 collection
-            chroma_collection = self.chroma_client.create_collection(name="knowledge_space")
+            chroma_collection = self.chroma_client.create_collection(
+                name="knowledge_space",
+                metadata={"hnsw:space": "cosine"}  # 指定使用余弦相似度
+            )
             
             vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
             storage_context = StorageContext.from_defaults(vector_store=vector_store)
-            
-            self.knowledge_index = VectorStoreIndex.from_documents(
-                docs,
+
+            self.knowledge_index = VectorStoreIndex(
+                nodes,
                 storage_context=storage_context,
                 embed_model=self.embed_model
             )
@@ -905,4 +966,21 @@ class RAGManager:
             error_msg = f"Chroma 刷新失败: {e}。系统要求使用向量存储，请检查 Chroma 数据库状态。"
             logging.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg)
+
+    def reset_vector_db(self):
+        """
+        清空并重置整个 Chroma 向量数据库。
+        这是一个危险操作，会删除所有集合和数据。
+        """
+        if self.chroma_client:
+            try:
+                logging.warning("正在重置 Chroma 向量数据库...")
+                self.chroma_client.reset()  # 删除所有集合
+                logging.info("✅ Chroma 向量数据库已成功重置。")
+                return "Chroma 向量数据库已成功重置。"
+            except Exception as e:
+                error_msg = f"Chroma 数据库重置失败: {e}"
+                logging.error(error_msg, exc_info=True)
+                return f"错误: {error_msg}"
+        return "错误: Chroma 客户端未初始化。"
 

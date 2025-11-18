@@ -26,6 +26,17 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
     
+    /* 减小评估指标字体大小 */
+    [data-testid="stMetricValue"] {
+        font-size: 1.3rem; /* 减小值的字体大小 */
+        color: #2c3e50;
+    }
+    [data-testid="stMetricLabel"] p {
+        font-size: 0.9rem; /* 减小标签的字体大小 */
+        color: #5a6c7d;
+        font-weight: 500;
+    }
+
     .stApp {
         background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
         font-family: 'Inter', sans-serif;
@@ -675,8 +686,9 @@ if prompt := st.chat_input("请在这里输入您的问题..."):
                 intent_score=intent_score
             )
             
-            # 显示评估指标（紧凑版）
-            with st.expander("📊 评估指标", expanded=False):
+            # 显示评估指标与来源
+            expander_title = "📊 评估指标与来源" if rag_enabled and src_nodes else "📊 评估指标"
+            with st.expander(expander_title, expanded=False):
                 if rag_enabled:
                     # 行业助手模式：紧凑布局
                     # 第一行：基础指标
@@ -703,6 +715,20 @@ if prompt := st.chat_input("请在这里输入您的问题..."):
                         st.metric("召回率", f"{metrics.recall:.3f}")
                     with eval_col4:
                         st.metric("F1分数", f"{metrics.f1_score:.3f}")
+
+                    # 第三行：意图得分
+                    if metrics.intent_score > 0:
+                        st.metric("最高意图得分", f"{metrics.intent_score:.3f}", help=f"当前阈值: {intent_threshold}")
+
+                    # 第四行：来源文档
+                    if src_nodes:
+                        st.markdown("---")
+                        st.markdown("##### 📚 来源文档")
+                        for i, n in enumerate(src_nodes, 1):
+                            file_name = os.path.basename(n.node.metadata.get("file_path", "未知来源"))
+                            score = n.score
+                            st.caption(f"**{i}. {file_name}** (相似度: {score:.3f})")
+
                 else:
                     # 通用助手模式：紧凑布局
                     col1, col2, col3, col4 = st.columns(4)
@@ -714,15 +740,6 @@ if prompt := st.chat_input("请在这里输入您的问题..."):
                         st.metric("置信度", f"{metrics.confidence:.3f}" if metrics.confidence > 0 else "N/A")
                     with col4:
                         st.caption("💡 通用助手模式不使用RAG检索")
-            
-            # 显示来源信息
-            if rag_enabled and src_nodes:
-                with st.expander("📚 来源与评分", expanded=False):
-                    for i, n in enumerate(src_nodes[:3], 1):  # 只显示前3个
-                        md = getattr(n.node, "metadata", {})
-                        sc = getattr(n, "score", None)
-                        st.markdown(f"**来源 {i}**")
-                        st.json({"metadata": md, "相似度分数": sc})
             
             # 反馈功能 - 为新生成的回答创建反馈
             # 获取当前消息的索引（已在上面定义）

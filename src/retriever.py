@@ -491,8 +491,15 @@ class RAGManager:
                 documents = [Document(text="这是一个空的占位文档。")]
             else:
                 logging.info(f"从 '{documents_dir}' 加载文档并创建新索引（Chroma）...")
-                reader = SimpleDirectoryReader(documents_dir)
-                documents = reader.load_data()
+                # --- [核心修改] ---
+                # 根据collection_name选择不同的文档加载方式
+                if collection_name == "intent_space":
+                    logging.info("使用Q&A解析器加载意图空间文档...")
+                    documents = self._load_qa_documents(documents_dir)
+                else:
+                    logging.info("使用默认解析器加载知识空间文档...")
+                    reader = SimpleDirectoryReader(documents_dir)
+                    documents = reader.load_data()
             
             # 使用 Chroma 向量存储创建索引
             index = VectorStoreIndex.from_documents(
@@ -508,6 +515,55 @@ class RAGManager:
             logging.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg)
     
+    def _load_qa_documents(self, directory: str) -> list:
+        """
+        从目录加载Q&A格式的文档。
+        每个Q&A对被解析为一个独立的Document对象，其中text是问题，metadata包含答案。
+        """
+        from llama_index.core.schema import Document
+        import re
+        
+        qa_documents = []
+        if not os.path.exists(directory):
+            logging.warning(f"意图空间目录不存在: {directory}")
+            return []
+
+        for filename in os.listdir(directory):
+            if filename.endswith(".txt"):
+                filepath = os.path.join(directory, filename)
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    
+                    # 使用正则表达式查找所有Q&A对
+                    # (?=\nQ:|\Z) 是一个正向先行断言，用于处理文件末尾的最后一个A
+                    qa_pairs = re.findall(r'Q:\s*(.*?)\s*A:\s*(.*?)(?=\nQ:|\Z)', content, re.DOTALL)
+                    
+                    for q, a in qa_pairs:
+                        question = q.strip()
+                        answer = a.strip()
+                        if not question:
+                            continue
+                        # 文档的text是问题，将被向量化
+                        # 答案存储在元数据中，以便后续检索
+                        doc = Document(
+                            text=question,
+                            metadata={
+                                "answer": answer,
+                                "file_name": filename
+                            }
+                        )
+                        qa_documents.append(doc)
+                    logging.info(f"从 {filename} 加载了 {len(qa_pairs)} 个Q&A对")
+                except Exception as e:
+                    logging.error(f"解析Q&A文件失败: {filepath}, 错误: {e}")
+
+        if not qa_documents:
+            logging.warning(f"在 '{directory}' 中未找到任何Q&A对，将创建一个空的占位文档。")
+            qa_documents.append(Document(text="这是一个空的占位问题。", metadata={"answer": "这是一个空的占位回答。"}))
+            
+        return qa_documents
+
     def _load_or_create_index_json(self, documents_dir: str, persist_dir: str) -> VectorStoreIndex:
         """
         使用 JSON 文件存储加载或创建索引（已废弃）
@@ -685,19 +741,25 @@ class RAGManager:
 
     def refresh_intent_index(self) -> None:
         """刷新意图空间索引"""
-        from llama_index.core import SimpleDirectoryReader, VectorStoreIndex
+        from llama_index.core import VectorStoreIndex
         if self.embed_model is None:
             logging.warning("嵌入不可用，跳过意图索引刷新")
             return
         
-        docs = []
-        if os.path.exists(self.intent_space_dir) and os.listdir(self.intent_space_dir):
-            reader = SimpleDirectoryReader(self.intent_space_dir)
-            docs.extend(reader.load_data())
-        docs.extend(self.feedback_store.get_positive_documents())
-        if len(docs) == 0:
-            from llama_index.core.schema import Document
-            docs = [Document(text="")]
+        # --- [核心修改] ---
+        # 使用新的Q&A解析器加载文档
+        docs = self._load_qa_documents(self.intent_space_dir)
+        
+        # 将反馈空间中的优质文档也加入意图空间
+        positive_feedback_docs = self.feedback_store.get_positive_documents()
+        if positive_feedback_docs:
+            docs.extend(positive_feedback_docs)
+            logging.info(f"从反馈空间加载了 {len(positive_feedback_docs)} 个优质回答到意图空间")
+
+        if not docs:
+            logging.warning("没有可用于刷新意图索引的文档，操作中止。")
+            # 如果没有文档，我们可以选择清空索引或保持原样。这里选择保持原样。
+            return
         
         # 使用 Chroma 向量存储（系统要求）
         if not self.use_chroma or self.chroma_client is None:

@@ -268,6 +268,37 @@ class FeedbackStore:
         
         return feedbacks
     
+    def get_all_interactions(self) -> List[dict]:
+        """
+        获取所有交互记录，无论是否有反馈。
+        
+        Returns:
+            list: 所有交互记录的列表
+        """
+        with self._get_db_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, question, answer, sources, rating, correction, created_at
+                FROM interactions
+                ORDER BY created_at DESC
+            """)
+            rows = cur.fetchall()
+        
+        # 将元组转换为字典列表
+        interactions = [
+            {
+                "id": row[0],
+                "question": row[1],
+                "answer": row[2],
+                "sources": row[3],
+                "rating": row[4],
+                "correction": row[5],
+                "created_at": row[6]
+            }
+            for row in rows
+        ]
+        return interactions
+
     def get_feedback_count(self, rating_filter: Optional[int] = None) -> int:
         """
         获取反馈总数

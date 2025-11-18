@@ -12,3 +12,4 @@ python-dotenv
 tiktoken
 nest_asyncio
 ipython
+plotly

@@ -188,9 +188,22 @@ st.markdown("""
     /* Features Section */
     .features-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        grid-template-columns: repeat(4, 1fr);
         gap: 1.5rem;
         margin-top: 2rem;
+        margin-bottom: 2rem;
+    }
+    
+    @media (max-width: 1200px) {
+        .features-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+    
+    @media (max-width: 768px) {
+        .features-grid {
+            grid-template-columns: 1fr;
+        }
     }
     .feature-card {
         background-color: #FFFFFF;
@@ -288,27 +301,47 @@ st.subheader("核心功能")
 st.markdown("""
 <div class="features-grid">
     <div class="feature-card">
+        <div class="feature-icon">🎯</div>
+        <div class="feature-title">智能问答系统</div>
+        <div class="feature-description">支持通用助手和行业助手双模式，可配置检索参数，实时流式输出，思考过程可视化。</div>
+    </div>
+    <div class="feature-card">
+        <div class="feature-icon">📚</div>
+        <div class="feature-title">知识空间管理</div>
+        <div class="feature-description">可视化文档管理，支持多格式文件上传，一键刷新索引，文件统计与分析。</div>
+    </div>
+    <div class="feature-card">
+        <div class="feature-icon">💡</div>
+        <div class="feature-title">意图空间管理</div>
+        <div class="feature-description">高质量问答对管理，文件上传与筛选，高频问题识别，优质问答对提取。</div>
+    </div>
+    <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <div class="feature-title">反馈空间分析</div>
+        <div class="feature-description">用户反馈可视化，评分分布图表，问题类型统计，反馈数据筛选与导出。</div>
+    </div>
+    <div class="feature-card">
         <div class="feature-icon">🧠</div>
         <div class="feature-title">三层知识空间</div>
         <div class="feature-description">独创的知识、意图、反馈三层知识空间架构，实现知识的精准检索与持续进化。</div>
-            </div>
-    <div class="feature-card">
-        <div class="feature-icon">🔍</div>
-        <div class="feature-title">多源知识接入</div>
-        <div class="feature-description">支持文档、数据库、API等多种知识源接入，轻松构建行业专属知识库。</div>
-            </div>
+    </div>
     <div class="feature-card">
         <div class="feature-icon">🔄</div>
-        <div class="feature-title">智能意图识别</div>
-        <div class="feature-description">通过意图空间准确理解用户查询，匹配最相关的知识与服务。</div>
-            </div>
+        <div class="feature-title">持续学习闭环</div>
+        <div class="feature-description">自动收集反馈，识别高频问题，提取优质问答对，持续优化系统性能。</div>
+    </div>
     <div class="feature-card">
         <div class="feature-icon">📈</div>
-        <div class="feature-title">反馈驱动优化</div>
-        <div class="feature-description">利用用户反馈持续优化问答效果，形成数据驱动的系统进化闭环。</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        <div class="feature-title">多维度评估</div>
+        <div class="feature-description">提供置信度、精确率、召回率、F1分数等评估指标，量化问答质量。</div>
+    </div>
+    <div class="feature-card">
+        <div class="feature-icon">🎨</div>
+        <div class="feature-title">现代化UI</div>
+        <div class="feature-description">卡片式列表展示，可折叠详情视图，渐变色彩设计，流畅交互体验。</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 
 # --- 系统架构图 ---

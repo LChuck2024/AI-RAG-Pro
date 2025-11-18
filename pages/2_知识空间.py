@@ -3,17 +3,25 @@
 显示和管理知识空间中的文档内容
 """
 import streamlit as st
-import sys
 import os
 import pandas as pd
+import plotly.express as px
 from pathlib import Path
 from typing import List, Dict
+from datetime import datetime
+from src.utils import setup_project_path, format_local_time
 
 # 将项目根目录添加到Python路径中
-from src.utils import setup_project_path
 setup_project_path()
 
 from config.load_key import load_config
+from 首页 import load_rag_manager, get_rag_manager_cache_key
+
+st.set_page_config(
+    page_title="知识空间管理",
+    page_icon="📚",
+    layout="wide",
+)
 
 # 自定义CSS
 st.markdown("""
@@ -113,12 +121,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-def load_knowledge_space() -> List[Dict[str, str]]:
+def load_knowledge_space() -> list[dict[str, str]]:
     """
     加载知识空间中的所有文档
     
     Returns:
-        List[Dict]: 文档列表，每个元素包含file_name, content, file_path
+        list[dict]: 文档列表，每个元素包含file_name, content, file_path
     """
     config = load_config()
     rag_config = config.get("rag", {})
@@ -149,7 +157,7 @@ def load_knowledge_space() -> List[Dict[str, str]]:
 
 # 页面标题
 st.markdown("""
-<div style='text-align: center; margin-bottom: 2rem;'>
+<div style='text-align: left; margin-bottom: 2rem;'>
     <h1 style='margin: 0; color: #2c3e50; font-size: 2.5rem;'>📚 知识空间</h1>
     <p style='margin: 0.5rem 0 0 0; color: #5a6c7d; font-size: 1.1rem;'>查看和管理知识空间中的文档内容</p>
 </div>
@@ -197,135 +205,262 @@ with st.sidebar:
     # 自动刷新提示
     st.caption("💡 数据每5秒自动更新，或点击刷新按钮立即更新")
 
-# 主要内容区域
-if not all_documents:
-    st.info("📭 知识空间中暂无文档。请将文档文件（.txt 或 .md 格式）放入 `rag_source/knowledge_space/` 目录。")
-else:
-    # 搜索功能
-    search_query = st.text_input("🔍 搜索文档", placeholder="输入关键词搜索文档名称或内容...", help="在文档名称和内容中搜索关键词")
-    
-    # 筛选数据（排除空文档）
-    filtered_documents = [doc for doc in all_documents if doc['content'].strip()]
-    if search_query:
-        search_lower = search_query.lower()
-        filtered_documents = [
-            doc for doc in filtered_documents
-            if search_lower in doc['file_name'].lower() or search_lower in doc['content'].lower()
-        ]
-    
-    # 显示统计信息
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("总文档数", len(all_documents))
-    with col2:
-        st.metric("当前显示", len(filtered_documents))
-    with col3:
-        total_words_display = sum(doc['word_count'] for doc in filtered_documents)
-        st.metric("总字数", f"{total_words_display:,}")
-    with col4:
-        avg_words_display = total_words_display / len(filtered_documents) if filtered_documents else 0
-        st.metric("平均字数", f"{avg_words_display:.0f}")
-    
-    st.markdown("---")
-    
-    # 表格展示
-    st.markdown("### 📋 文档列表")
-    
-    if not filtered_documents:
-        st.warning("没有找到匹配的文档。请调整搜索关键词。")
-    else:
-        # 准备表格数据
-        table_data = []
-        for idx, doc in enumerate(filtered_documents, 1):
-            # 截断长文本（用于表格显示，完整内容存储在完整字段中）
-            # 移除空行和多余空白，将内容压缩为单行预览
-            content_clean = doc['content'].strip()
-            # 移除所有换行符和多余空格，压缩为单行
-            content_clean = ' '.join([line.strip() for line in content_clean.split('\n') if line.strip()])
-            content_short = content_clean[:150] + "..." if len(content_clean) > 150 else content_clean
+# --- 缓存函数 ---
+@st.cache_data(ttl=3600)  # 缓存1小时
+def get_loaded_documents(_rag_manager):
+    """从知识空间目录加载文档列表和内容"""
+    if _rag_manager and hasattr(_rag_manager, 'knowledge_space_dir'):
+        docs_dir = _rag_manager.knowledge_space_dir
+        if os.path.exists(docs_dir):
+            doc_list = []
+            for filename in os.listdir(docs_dir):
+                if not filename.startswith('.'):  # 忽略隐藏文件
+                    filepath = os.path.join(docs_dir, filename)
+                    try:
+                        # 获取文件元数据
+                        stat = os.stat(filepath)
+                        last_modified = format_local_time(datetime.fromtimestamp(stat.st_mtime).isoformat())
+                        file_size = f"{stat.st_size / 1024:.2f} KB" if stat.st_size > 1024 else f"{stat.st_size} B"
+                        
+                        # 读取文件内容（限制大小以避免UI卡顿）
+                        content = ""
+                        if stat.st_size < 1024 * 1024: # 只读取小于1MB的文件内容
+                            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                                content = f.read()
+                        
+                        doc_list.append({
+                            "name": filename,
+                            "modified": last_modified,
+                            "size": file_size,
+                            "content": content
+                        })
+                    except Exception as e:
+                        st.warning(f"读取文件 '{filename}' 失败: {e}")
+            # 按文件名排序
+            return sorted(doc_list, key=lambda x: x['name'])
+    return []
+
+# --- 页面加载 ---
+rag_manager = None
+try:
+    cache_key = get_rag_manager_cache_key()
+    rag_manager = load_rag_manager(_cache_key=cache_key)
+except Exception as e:
+    st.error(f"❌ RAG 管理器加载失败: {e}")
+    st.warning("请检查 API 密钥配置和网络连接。")
+
+# --- 主体内容 ---
+if rag_manager:
+    # st.header("📚 文档概览")
+
+    with st.container():
+        # --- 统计信息 ---
+        st.markdown("#### 📊 统计概览")
+        documents_for_stats = get_loaded_documents(rag_manager)
+        
+        if documents_for_stats:
+
+            # --- Visualizations ---
+            df_stats = pd.DataFrame(documents_for_stats)
+            df_stats['word_count'] = df_stats['content'].str.len()
+            df_stats['file_type'] = df_stats['name'].apply(lambda x: x.split('.')[-1])
+
+            viz_col1, viz_col2 = st.columns(2)
+            with viz_col1:
+                # File Type Distribution (Pie Chart)
+                st.markdown("###### 文件类型分布")
+                file_type_counts = df_stats['file_type'].value_counts().reset_index()
+                file_type_counts.columns = ['file_type', 'count']
+                fig_pie = px.pie(
+                    file_type_counts, 
+                    names='file_type', 
+                    values='count', 
+                    title='', 
+                    hole=0.4,
+                    color_discrete_sequence=px.colors.qualitative.Pastel
+                )
+                fig_pie.update_traces(
+                    textinfo='percent+label', 
+                    textposition='inside',
+                    hovertemplate='类型: %{label}<br>数量: %{value}<br>占比: %{percent}'
+                )
+                fig_pie.update_layout(
+                    showlegend=False, 
+                    height=300,
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)'
+                )
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+            with viz_col2:
+                # Document Length Distribution (Bar Chart)
+                st.markdown("###### 文档长度分布 (按字数)")
+                bins = [0, 500, 2000, 5000, float('inf')]
+                labels = ['0-500', '500-2k', '2k-5k', '5k+']
+                df_stats['length_bin'] = pd.cut(df_stats['word_count'], bins=bins, labels=labels, right=False)
+                length_counts = df_stats['length_bin'].value_counts().sort_index().reset_index()
+                length_counts.columns = ['length_bin', 'count']
+                fig_bar = px.bar(
+                    length_counts, 
+                    x='length_bin', 
+                    y='count', 
+                    title='',
+                    text_auto=True # Display count on bars
+                )
+                fig_bar.update_traces(
+                    marker_color='rgb(102, 126, 234)', 
+                    marker_line_color='rgb(8, 48, 107)',
+                    marker_line_width=1.5, 
+                    opacity=0.8,
+                    hovertemplate='字数区间: %{x}<br>文档数量: %{y}'
+                )
+                fig_bar.update_layout(
+                    xaxis_title=None, 
+                    yaxis_title="文档数", 
+                    height=300,
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)'
+                )
+                st.plotly_chart(fig_bar, use_container_width=True)
             
-            table_data.append({
-                "序号": idx,
-                "文件名": doc['file_name'],
-                "内容预览": content_short,
-                "字数": doc['word_count'],
-                "大小": f"{doc['file_size'] / 1024:.2f} KB",
-                "完整内容": doc['content']
-            })
-        
-        # 创建DataFrame
-        df = pd.DataFrame(table_data)
-        
-        # 选择要显示的列
-        display_columns = ["序号", "文件名", "内容预览", "字数", "大小"]
-        df_display = df[display_columns].copy()
-        
-        # 为每行添加提示（如果内容被截断）
-        for idx, row in df_display.iterrows():
-            full_content = df.loc[idx, "完整内容"]
-            if len(full_content) > 150:
-                df_display.at[idx, "内容预览"] = f"{row['内容预览']} (点击查看详情)"
-        
-        # 使用st.dataframe展示表格
-        selected_rows = st.dataframe(
-            df_display,
-            use_container_width=True,
-            height=600,
-            hide_index=True,
-            column_config={
-                "序号": st.column_config.NumberColumn("序号", width="small"),
-                "文件名": st.column_config.TextColumn("文件名", width="medium"),
-                "内容预览": st.column_config.TextColumn(
-                    "内容预览", 
-                    width="large",
-                    help="内容较长时请点击下方'详细信息查看'查看完整内容"
-                ),
-                "字数": st.column_config.NumberColumn("字数", width="small"),
-                "大小": st.column_config.TextColumn("大小", width="small"),
-            }
-        )
+
+        else:
+            st.metric("文档总数", "0 篇")
         
         st.markdown("---")
         
-        # 详细信息查看区域
-        st.markdown("### 🔍 详细信息查看")
+        # --- File Upload Section ---
+        st.markdown("#### ⬆️ 上传新文档")
+        uploaded_files = st.file_uploader(
+            "将文件拖拽至此或点击上传",
+            accept_multiple_files=True,
+            type=['txt', 'md', 'pdf', 'docx', 'csv'],
+            label_visibility="collapsed"
+        )
+        if uploaded_files:
+            success_count = 0
+            for uploaded_file in uploaded_files:
+                save_path = os.path.join(rag_manager.knowledge_space_dir, uploaded_file.name)
+                try:
+                    with open(save_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    success_count += 1
+                except Exception as e:
+                    st.error(f"❌ 文件 '{uploaded_file.name}' 上传失败: {e}")
+            if success_count > 0:
+                st.success(f"✅ 成功上传 {success_count} 个文件！")
+                st.info("💡 请点击下方的 **刷新索引** 按钮以应用更改。")
+                get_loaded_documents.clear()
         
-        # 选择要查看的文档
-        doc_options = [f"{idx+1}. {doc['file_name']}" for idx, doc in enumerate(filtered_documents)]
-        
-        if doc_options:
-            selected_idx = st.selectbox(
-                "选择文档查看详细信息",
-                range(len(doc_options)),
-                format_func=lambda x: doc_options[x],
-                index=0
-            )
-            
-            selected_doc = filtered_documents[selected_idx]
-            
-            # 创建两列布局
-            col1, col2 = st.columns([3, 1])
-            
-            with col1:
-                st.markdown("#### 📝 基本信息")
-                info_data = {
-                    "文件名": selected_doc['file_name'],
-                    "字数": f"{selected_doc['word_count']:,} 字",
-                    "文件大小": f"{selected_doc['file_size'] / 1024:.2f} KB",
-                    "文件路径": selected_doc['file_path']
-                }
-                for key, value in info_data.items():
-                    st.markdown(f"**{key}**: {value}")
-            
-            with col2:
-                st.markdown("#### 📊 统计")
-                st.metric("字数", selected_doc['word_count'])
-                st.metric("大小", f"{selected_doc['file_size'] / 1024:.2f} KB")
-            
-            st.markdown("---")
-            
-            # 文档内容（默认收起）
-            with st.expander("📄 查看文档内容", expanded=False):
-                # 使用st.markdown直接渲染Markdown内容
-                st.markdown(selected_doc['content'])
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔄 刷新知识索引", use_container_width=True, type="primary"):
+                with st.spinner("正在刷新知识空间索引..."):
+                    try:
+                        rag_manager.refresh_knowledge_index()
+                        st.success("✅ 知识空间索引已刷新！")
+                        get_loaded_documents.clear()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ 刷新索引时出错: {e}")
+        with col2:
+            if st.button("💥 重置向量库", use_container_width=True):
+                st.session_state['confirm_reset'] = True
+        st.markdown("---")
+
+
+    st.markdown("#### 📂 文档列表")
+    documents = get_loaded_documents(rag_manager)
+    
+    if not documents:
+        st.info("当前知识空间为空。请在右侧上传您的第一个文档。")
+    else:
+        # [Corrected Logic] Move expander outside the loop
+        with st.expander(f"查看全部 {len(documents)} 个文档", expanded=True):
+            # Loop through documents inside the expander
+            for doc in documents:
+                file_extension = doc['name'].split('.')[-1]
+                icon_map = {"md": "📝", "txt": "📄", "pdf": "📕", "docx": "📘", "csv": "📊"}
+                icon = icon_map.get(file_extension, "📁")
+
+                with st.container():
+                    col1, col2 = st.columns([0.8, 0.2]) # 80% for info, 20% for buttons
+                    with col1:
+                        st.markdown(f"""
+                        <div class="doc-card">
+                            <div class="doc-title">{icon} {doc['name']}</div>
+                            <div class="doc-meta">大小: {doc['size']} | 最后修改: {doc['modified']}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    
+                    with col2:
+                        st.write("") # Spacer for vertical alignment
+                        btn_col1, btn_col2 = st.columns(2)
+                        with btn_col1:
+                            # Toggle view state on button click
+                            if st.button("查看", key=f"view_{doc['name']}", use_container_width=True):
+                                if st.session_state.get('doc_to_view_name') == doc['name']:
+                                    st.session_state['doc_to_view_name'] = None
+                                else:
+                                    st.session_state['doc_to_view_name'] = doc['name']
+                        with btn_col2:
+                            if st.button("删除", key=f"delete_{doc['name']}", use_container_width=True, type="secondary"):
+                                st.session_state['doc_to_delete'] = doc
+
+                    # In-place preview logic
+                    if st.session_state.get('doc_to_view_name') == doc['name']:
+                        st.markdown("---")
+                        st.code(doc['content'] if doc['content'] else "（文件内容为空或过大无法预览）", language="markdown")
+                        if st.button("关闭预览", key=f"close_view_{doc['name']}", use_container_width=True):
+                            st.session_state['doc_to_view_name'] = None
+                            st.rerun()
+    
+    # --- Modal logic for deletion/reset ---
+    if st.session_state.get('doc_to_delete'):
+        doc = st.session_state['doc_to_delete']
+        st.warning(f"您确定要删除文件 **{doc['name']}** 吗？此操作不可恢复。")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("✅ 确认删除", use_container_width=True, type="primary"):
+                try:
+                    os.remove(os.path.join(rag_manager.knowledge_space_dir, doc['name']))
+                    st.success(f"文件 '{doc['name']}' 已删除。请刷新索引。")
+                    del st.session_state['doc_to_delete']
+                    get_loaded_documents.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ 删除文件时出错: {e}")
+                    del st.session_state['doc_to_delete']
+     
+        with c2:
+            if st.button("❌ 取消", use_container_width=True):
+                del st.session_state['doc_to_delete']
+                st.rerun()
+
+        if st.session_state.get('confirm_reset'):
+            st.warning("您确定要重置整个向量数据库吗？所有索引都将被删除并需要重新构建。")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("✅ 确认重置", use_container_width=True, type="primary"):
+                    with st.spinner("正在重置向量数据库..."):
+                        try:
+                            result = rag_manager.reset_vector_db()
+                            st.success(f"✅ {result}")
+                            load_rag_manager.clear()
+                            get_loaded_documents.clear()
+                            del st.session_state['confirm_reset']
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ 重置向量数据库时出错: {e}")
+                            del st.session_state['confirm_reset']
+            with c2:
+                if st.button("❌ 取消重置", use_container_width=True):
+                    del st.session_state['confirm_reset']
+                    st.rerun()
+else:
+    # RAG Manager 加载失败时的提示
+    st.error("❌ RAG 管理器加载失败。")
+    st.warning("请检查 API 密钥配置或网络连接。")
 

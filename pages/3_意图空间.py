@@ -215,7 +215,7 @@ def load_intent_space() -> List[Dict[str, str]]:
 
 # 页面标题
 st.markdown("""
-<div style='text-align: center; margin-bottom: 2rem;'>
+<div style='text-align: left; margin-bottom: 2rem;'>
     <h1 style='margin: 0; color: #2c3e50; font-size: 2.5rem;'>🎯 意图空间</h1>
     <p style='margin: 0.5rem 0 0 0; color: #5a6c7d; font-size: 1.1rem;'>查看和管理意图空间中的问答对</p>
 </div>
@@ -295,6 +295,57 @@ with st.sidebar:
     您可以通过编辑 `rag_source/intent_space/` 目录下的文件来管理问答对。
     """)
 
+st.markdown("---")
+
+# 文件上传组件
+st.markdown("### ⬆️ 上传问答对文件")
+st.info("""
+📋 **支持的文件格式：**
+- **TXT 文件**：纯文本格式，使用 `Q:` 开头表示问题，`A:` 开头表示答案
+- **Markdown 文件**：使用标准 Markdown 格式编写问答对
+
+📝 **文件格式示例：**
+```
+Q: 什么是RAG？
+A: RAG（Retrieval-Augmented Generation，检索增强生成）是一种结合信息检索和文本生成的先进技术架构。
+
+Q: 如何使用意图空间？
+A: 在意图空间中添加高频问题和标准答案，系统会自动匹配相似问题并返回对应答案。
+```
+""")
+
+uploaded_files = st.file_uploader(
+    "选择要上传的问答对文件",
+    accept_multiple_files=True,
+    type=['txt', 'md'],
+    help="支持上传多个 TXT 或 Markdown 格式的问答对文件"
+)
+
+if uploaded_files:
+    config = load_config()
+    rag_config = config.get("rag", {})
+    intent_space_dir = rag_config.get("intent_space_dir", "./rag_source/intent_space")
+    
+    # 确保目录存在
+    os.makedirs(intent_space_dir, exist_ok=True)
+    
+    success_count = 0
+    for uploaded_file in uploaded_files:
+        try:
+            # 保存文件
+            file_path = os.path.join(intent_space_dir, uploaded_file.name)
+            with open(file_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            success_count += 1
+        except Exception as e:
+            st.error(f"❌ 文件 '{uploaded_file.name}' 上传失败: {e}")
+    
+    if success_count > 0:
+        st.success(f"✅ 成功上传 {success_count} 个文件到意图空间！")
+        st.info("💡 请刷新页面以查看新上传的问答对。")
+
+st.markdown("---")
+
 # 主要内容区域 - 使用标签页
 tab1, tab2, tab3 = st.tabs(["📁 文件中的问答对", "🔥 高频问题", "⭐ 优质问答对"])
 
@@ -303,12 +354,31 @@ with tab1:
     if not all_qa_pairs:
         st.info("📭 意图空间中暂无问答对数据。请将Q&A格式的文件放入 `rag_source/intent_space/` 目录。")
     else:
-        # 搜索功能
-        search_query = st.text_input("🔍 搜索问答对", placeholder="输入关键词搜索问题或答案...", help="在问题和答案中搜索关键词")
+        # 筛选功能
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            search_query = st.text_input("🔍 搜索问答对", placeholder="输入关键词搜索问题或答案...", help="在问题和答案中搜索关键词")
+        with col2:
+            # 获取所有唯一的文件名
+            all_files = sorted(list(set([qa['source_file'] for qa in all_qa_pairs])))
+            selected_files = st.multiselect(
+                "📁 筛选文件", 
+                options=all_files,
+                default=[],
+                help="选择要显示的文件，不选则显示全部"
+            )
         
         # 筛选数据
         filtered_qa_pairs = all_qa_pairs
         
+        # 按文件筛选
+        if selected_files:
+            filtered_qa_pairs = [
+                qa for qa in filtered_qa_pairs
+                if qa['source_file'] in selected_files
+            ]
+        
+        # 按关键词搜索
         if search_query:
             search_lower = search_query.lower()
             filtered_qa_pairs = [
@@ -331,134 +401,41 @@ with tab1:
         
         st.markdown("---")
         
-        # 表格展示
-        st.markdown("### 📋 问答对列表")
+        # 卡片列表展示
+        st.markdown(f"### 📋 问答对列表 ({len(filtered_qa_pairs)} 条)")
         
         if not filtered_qa_pairs:
             st.warning("没有找到匹配的问答对。请调整筛选条件或搜索关键词。")
         else:
-            # 准备表格数据
-            table_data = []
-            for idx, qa in enumerate(filtered_qa_pairs, 1):
-                # 截断长文本（用于表格显示，完整内容存储在完整字段中）
-                question_short = qa['question'][:100] + "..." if len(qa['question']) > 100 else qa['question']
-                answer_short = qa['answer'][:100] + "..." if len(qa['answer']) > 100 else qa['answer']
-                
-                table_data.append({
-                    "序号": idx,
-                    "问题": question_short,
-                    "答案": answer_short,
-                    "来源文件": qa['source_file'],
-                    "完整问题": qa['question'],
-                    "完整答案": qa['answer']
-                })
-            
-            # 创建DataFrame
-            df = pd.DataFrame(table_data)
-            
-            # 选择要显示的列
-            display_columns = ["序号", "问题", "答案", "来源文件"]
-            df_display = df[display_columns].copy()
-            
-            # 为每行添加提示（如果内容被截断）
-            for idx, row in df_display.iterrows():
-                full_question = df.loc[idx, "完整问题"]
-                full_answer = df.loc[idx, "完整答案"]
-                
-                # 如果内容被截断，添加提示
-                if len(full_question) > 100:
-                    df_display.at[idx, "问题"] = f"{row['问题']} (点击查看详情)"
-                if len(full_answer) > 100:
-                    df_display.at[idx, "答案"] = f"{row['答案']} (点击查看详情)"
-            
-            # 使用st.dataframe展示表格
-            selected_rows = st.dataframe(
-                df_display,
-                use_container_width=True,
-                height=600,
-                hide_index=True,
-                column_config={
-                    "序号": st.column_config.NumberColumn("序号", width="small"),
-                    "问题": st.column_config.TextColumn(
-                        "问题", 
-                        width="large",
-                        help="内容较长时请点击下方'详细信息查看'查看完整内容"
-                    ),
-                    "答案": st.column_config.TextColumn(
-                        "答案", 
-                        width="large",
-                        help="内容较长时请点击下方'详细信息查看'查看完整内容"
-                    ),
-                    "来源文件": st.column_config.TextColumn("来源文件", width="medium"),
-                }
-            )
-            
-            st.markdown("---")
-            
-            # 详细信息查看区域
-            st.markdown("### 🔍 详细信息查看")
-            
-            # 选择要查看的问答对
-            qa_options = [f"{idx+1}. {qa['question'][:50]}..." if len(qa['question']) > 50 else f"{idx+1}. {qa['question']}" 
-                         for idx, qa in enumerate(filtered_qa_pairs)]
-            
-            if qa_options:
-                selected_idx = st.selectbox(
-                    "选择问答对查看详细信息",
-                    range(len(qa_options)),
-                    format_func=lambda x: qa_options[x],
-                    index=0
-                )
-                
-                selected_qa = filtered_qa_pairs[selected_idx]
-                
-                # 创建两列布局
-                col1, col2 = st.columns([3, 1])
-                
-                with col1:
-                    st.markdown("#### 📝 基本信息")
-                    info_data = {
-                        "序号": selected_idx + 1,
-                        "来源文件": selected_qa['source_file'],
-                        "问题长度": f"{len(selected_qa['question'])} 字",
-                        "答案长度": f"{len(selected_qa['answer'])} 字"
-                    }
-                    for key, value in info_data.items():
-                        st.markdown(f"**{key}**: {value}")
-                
-                with col2:
-                    st.markdown("#### 📊 统计")
-                    st.metric("问题字数", len(selected_qa['question']))
-                    st.metric("答案字数", len(selected_qa['answer']))
-                
-                st.markdown("---")
-                
-                # 详细内容
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.markdown("#### ❓ 问题")
-                    st.markdown(f"""
-                    <div class='question-box'>
-                        {selected_qa['question']}
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                with col2:
-                    st.markdown("#### 💡 答案")
-                    st.markdown(f"""
-                    <div class='answer-box'>
-                        {selected_qa['answer']}
-                    </div>
-                    """, unsafe_allow_html=True)
-                
-                # 文件路径信息
-                st.markdown("#### 📁 文件信息")
-                config = load_config()
-                rag_config = config.get("rag", {})
-                intent_space_dir = rag_config.get("intent_space_dir", "./rag_source/intent_space")
-                file_path = os.path.join(intent_space_dir, selected_qa['source_file'])
-                st.code(file_path, language=None)
+            with st.expander(f"查看全部 {len(filtered_qa_pairs)} 条问答对", expanded=True):
+                for idx, qa in enumerate(filtered_qa_pairs, 1):
+                    with st.container():
+                        # 卡片头部
+                        col1, col2 = st.columns([0.85, 0.15])
+                        with col1:
+                            header_html = '<div style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); border-left: 5px solid #667eea; border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">'
+                            header_html += f'<div style="display: flex; justify-content: space-between; align-items: center;"><div><span style="font-size: 1rem; color: #667eea; font-weight: 600;">📋 问答对 #{idx}</span></div><span style="color: #6b7280; font-size: 0.875rem;">📁 {qa["source_file"]}</span></div>'
+                            header_html += f'<div style="margin-top: 8px; color: #6b7280; font-size: 0.9rem;">问题: {qa["question"][:60]}{"..." if len(qa["question"]) > 60 else ""}</div>'
+                            header_html += '</div>'
+                            st.markdown(header_html, unsafe_allow_html=True)
+                        
+                        with col2:
+                            if st.button("📖 展开" if st.session_state.get(f'qa_expand_{idx}') != True else "📕 收起", 
+                                        key=f"toggle_qa_{idx}", 
+                                        use_container_width=True):
+                                current_state = st.session_state.get(f'qa_expand_{idx}', False)
+                                st.session_state[f'qa_expand_{idx}'] = not current_state
+                                st.rerun()
+                        
+                        # 详细内容
+                        if st.session_state.get(f'qa_expand_{idx}', False):
+                            st.markdown("---")
+                            st.markdown("**❓ 问题**")
+                            st.info(qa['question'])
+                            st.markdown("**💡 答案**")
+                            st.success(qa['answer'])
+                            st.caption(f"来源文件: {qa['source_file']} | 问题长度: {len(qa['question'])} 字 | 答案长度: {len(qa['answer'])} 字")
+                            st.markdown("---")
 
 # 标签2：高频问题
 with tab2:
@@ -482,86 +459,60 @@ with tab2:
         
         st.markdown("---")
         
-        # 表格展示
-        table_data = []
-        for idx, fq in enumerate(frequent_questions, 1):
-            question_short = fq['question'][:100] + "..." if len(fq['question']) > 100 else fq['question']
-            avg_rating_display = f"{fq['avg_rating']:.2f}" if fq['avg_rating'] is not None else "无反馈"
-            table_data.append({
-                "序号": idx,
-                "问题": question_short,
-                "出现次数": fq['count'],
-                "反馈次数": fq.get('feedback_count', 0),
-                "平均评分": avg_rating_display,
-                "最后提问": format_local_time(fq['last_asked'], include_seconds=True),
-                "完整问题": fq['question']
-            })
+        # 卡片列表展示
+        st.markdown(f"### 📋 高频问题列表 ({len(frequent_questions)} 条)")
         
-        df_frequent = pd.DataFrame(table_data)
-        display_columns = ["序号", "问题", "出现次数", "反馈次数", "平均评分", "最后提问"]
-        df_frequent_display = df_frequent[display_columns].copy()
-        
-        # 为每行添加提示（如果内容被截断）
-        for idx, row in df_frequent_display.iterrows():
-            full_question = df_frequent.loc[idx, "完整问题"]
-            if len(full_question) > 100:
-                df_frequent_display.at[idx, "问题"] = f"{row['问题']} (点击查看详情)"
-        
-        st.dataframe(
-            df_frequent_display,
-            use_container_width=True,
-            height=600,
-            hide_index=True,
-            column_config={
-                "序号": st.column_config.NumberColumn("序号", width="small"),
-                "问题": st.column_config.TextColumn(
-                    "问题", 
-                    width="large",
-                    help="内容较长时请点击下方'详细信息'查看完整内容"
-                ),
-                "出现次数": st.column_config.NumberColumn("出现次数", width="small"),
-                "反馈次数": st.column_config.NumberColumn("反馈次数", width="small"),
-                "平均评分": st.column_config.TextColumn("平均评分", width="small"),
-                "最后提问": st.column_config.TextColumn("最后提问", width="medium"),
-            }
-        )
-        
-        st.markdown("---")
-        
-        # 详细信息
-        st.markdown("### 🔍 详细信息")
-        if frequent_questions:
-            selected_fq_idx = st.selectbox(
-                "选择高频问题查看详情",
-                range(len(frequent_questions)),
-                format_func=lambda x: f"{x+1}. {frequent_questions[x]['question'][:50]}..." 
-                if len(frequent_questions[x]['question']) > 50 
-                else f"{x+1}. {frequent_questions[x]['question']}",
-                index=0,
-                key="frequent_question_select"
-            )
-            
-            selected_fq = frequent_questions[selected_fq_idx]
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("#### 📊 统计信息")
-                st.metric("出现次数", selected_fq['count'])
-                st.metric("反馈次数", selected_fq.get('feedback_count', 0))
-                avg_rating_display = f"{selected_fq['avg_rating']:.2f}" if selected_fq['avg_rating'] is not None else "无反馈"
-                st.metric("平均评分", avg_rating_display)
-            with col2:
-                st.markdown("#### 📅 时间信息")
-                st.markdown(f"**最后提问时间**: {format_local_time(selected_fq['last_asked'], include_seconds=True)}")
-            
-            st.markdown("#### ❓ 问题内容")
-            st.markdown(f"""
-            <div class='question-box'>
-                {selected_fq['question']}
-            </div>
-            """, unsafe_allow_html=True)
-            
-            st.info("💡 建议：将此问题添加到意图空间文件中，并提供一个标准答案，以提高系统响应速度。")
+        with st.expander(f"查看全部 {len(frequent_questions)} 条高频问题", expanded=True):
+            for idx, fq in enumerate(frequent_questions, 1):
+                # 评分颜色
+                if fq['avg_rating'] is not None:
+                    if fq['avg_rating'] >= 4:
+                        rating_color = "#10b981"
+                    elif fq['avg_rating'] >= 3:
+                        rating_color = "#f59e0b"
+                    else:
+                        rating_color = "#ef4444"
+                    rating_display = f"{fq['avg_rating']:.2f} 分"
+                else:
+                    rating_color = "#9ca3af"
+                    rating_display = "无评分"
+                
+                with st.container():
+                    # 卡片头部
+                    col1, col2 = st.columns([0.85, 0.15])
+                    with col1:
+                        header_html = f'<div style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); border-left: 5px solid {rating_color}; border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">'
+                        header_html += f'<div style="display: flex; justify-content: space-between; align-items: center;"><div><span style="font-size: 1rem; color: {rating_color}; font-weight: 600;">🔥 出现 {fq["count"]} 次</span><span style="margin-left: 12px; color: {rating_color}; font-weight: 500;">{rating_display}</span></div><span style="color: #6b7280; font-size: 0.875rem;">🕐 {format_local_time(fq["last_asked"], include_seconds=False)}</span></div>'
+                        header_html += f'<div style="margin-top: 8px; color: #6b7280; font-size: 0.9rem;">问题: {fq["question"][:60]}{"..." if len(fq["question"]) > 60 else ""}</div>'
+                        header_html += f'<div style="margin-top: 4px; color: #9ca3af; font-size: 0.85rem;">反馈次数: {fq.get("feedback_count", 0)}</div>'
+                        header_html += '</div>'
+                        st.markdown(header_html, unsafe_allow_html=True)
+                    
+                    with col2:
+                        if st.button("📖 展开" if st.session_state.get(f'fq_expand_{idx}') != True else "📕 收起", 
+                                    key=f"toggle_fq_{idx}", 
+                                    use_container_width=True):
+                            current_state = st.session_state.get(f'fq_expand_{idx}', False)
+                            st.session_state[f'fq_expand_{idx}'] = not current_state
+                            st.rerun()
+                    
+                    # 详细内容
+                    if st.session_state.get(f'fq_expand_{idx}', False):
+                        st.markdown("---")
+                        st.markdown("**❓ 问题完整内容**")
+                        st.info(fq['question'])
+                        
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("出现次数", fq['count'])
+                        with col2:
+                            st.metric("反馈次数", fq.get('feedback_count', 0))
+                        with col3:
+                            st.metric("平均评分", rating_display)
+                        
+                        st.caption(f"最后提问: {format_local_time(fq['last_asked'], include_seconds=True)}")
+                        st.info("💡 建议：将此问题添加到意图空间文件中，并提供一个标准答案，以提高系统响应速度。")
+                        st.markdown("---")
 
 # 标签3：优质问答对
 with tab3:
@@ -600,138 +551,66 @@ with tab3:
             filtered_high_quality = [qa for qa in filtered_high_quality if qa['has_correction']]
         filtered_high_quality = [qa for qa in filtered_high_quality if qa['rating'] >= min_rating_filter]
         
-        st.markdown(f"显示 {len(filtered_high_quality)} 条优质问答对")
         st.markdown("---")
         
-        # 表格展示
-        table_data = []
-        for idx, qa in enumerate(filtered_high_quality, 1):
-            question_short = qa['question'][:100] + "..." if len(qa['question']) > 100 else qa['question']
-            answer_short = qa['answer'][:100] + "..." if len(qa['answer']) > 100 else qa['answer']
-            correction_indicator = "✅" if qa['has_correction'] else ""
-            
-            table_data.append({
-                "序号": idx,
-                "问题": question_short,
-                "答案": answer_short,
-                "评分": qa['rating'],
-                "改进": correction_indicator,
-                "时间": format_local_time(qa['created_at'], include_seconds=True),
-                "完整问题": qa['question'],
-                "完整答案": qa['answer'],
-                "原始答案": qa.get('original_answer', ''),
-                "改进建议": qa.get('correction', ''),
-                "反馈ID": qa['id']
-            })
+        # 卡片列表展示
+        st.markdown(f"### 📋 优质问答对列表 ({len(filtered_high_quality)} 条)")
         
-        df_quality = pd.DataFrame(table_data)
-        display_columns = ["序号", "问题", "答案", "评分", "改进", "时间"]
-        df_quality_display = df_quality[display_columns].copy()
-        
-        # 为每行添加提示（如果内容被截断）
-        for idx, row in df_quality_display.iterrows():
-            full_question = df_quality.loc[idx, "完整问题"]
-            full_answer = df_quality.loc[idx, "完整答案"]
+        if not filtered_high_quality:
+            st.info("没有符合筛选条件的优质问答对")
+        else:
+            with st.expander(f"查看全部 {len(filtered_high_quality)} 条优质问答对", expanded=True):
+                for idx, qa in enumerate(filtered_high_quality, 1):
+                    # 评分颜色和星星
+                    rating_stars = "⭐" * qa['rating'] + "☆" * (5 - qa['rating'])
+                    if qa['rating'] >= 4:
+                        rating_color = "#10b981"
+                    else:
+                        rating_color = "#f59e0b"
+                    
+                    with st.container():
+                        # 卡片头部
+                        col1, col2 = st.columns([0.85, 0.15])
+                        with col1:
+                            header_html = f'<div style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); border-left: 5px solid {rating_color}; border-radius: 12px; padding: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">'
+                            header_html += f'<div style="display: flex; justify-content: space-between; align-items: center;"><div><span style="font-size: 1.1rem; color: {rating_color}; font-weight: 600;">{rating_stars}</span><span style="margin-left: 8px; color: {rating_color}; font-weight: 500;">{qa["rating"]} 分</span>'
+                            if qa['has_correction']:
+                                header_html += '<span style="margin-left: 8px; background-color: #dbeafe; color: #1e40af; padding: 2px 8px; border-radius: 4px; font-size: 0.85rem;">✅ 有改进</span>'
+                            header_html += f'</div><span style="color: #6b7280; font-size: 0.875rem;">🕐 {format_local_time(qa["created_at"], include_seconds=False)}</span></div>'
+                            header_html += f'<div style="margin-top: 8px; color: #6b7280; font-size: 0.9rem;">问题: {qa["question"][:60]}{"..." if len(qa["question"]) > 60 else ""}</div>'
+                            header_html += f'<div style="margin-top: 4px; color: #9ca3af; font-size: 0.85rem;">ID: {qa["id"]}</div>'
+                            header_html += '</div>'
+                            st.markdown(header_html, unsafe_allow_html=True)
+                        
+                        with col2:
+                            if st.button("📖 展开" if st.session_state.get(f'hq_expand_{qa["id"]}') != True else "📕 收起", 
+                                        key=f"toggle_hq_{qa['id']}", 
+                                        use_container_width=True):
+                                current_state = st.session_state.get(f'hq_expand_{qa["id"]}', False)
+                                st.session_state[f'hq_expand_{qa["id"]}'] = not current_state
+                                st.rerun()
+                        
+                        # 详细内容
+                        if st.session_state.get(f'hq_expand_{qa["id"]}', False):
+                            st.markdown("---")
             
-            # 如果内容被截断，添加提示
-            if len(full_question) > 100:
-                df_quality_display.at[idx, "问题"] = f"{row['问题']} (点击查看详情)"
-            if len(full_answer) > 100:
-                df_quality_display.at[idx, "答案"] = f"{row['答案']} (点击查看详情)"
-        
-        st.dataframe(
-            df_quality_display,
-            use_container_width=True,
-            height=600,
-            hide_index=True,
-            column_config={
-                "序号": st.column_config.NumberColumn("序号", width="small"),
-                "问题": st.column_config.TextColumn(
-                    "问题", 
-                    width="large",
-                    help="内容较长时请点击下方'详细信息'查看完整内容"
-                ),
-                "答案": st.column_config.TextColumn(
-                    "答案", 
-                    width="large",
-                    help="内容较长时请点击下方'详细信息'查看完整内容"
-                ),
-                "评分": st.column_config.NumberColumn("评分", width="small"),
-                "改进": st.column_config.TextColumn("改进", width="small"),
-                "时间": st.column_config.TextColumn("时间", width="medium"),
-            }
-        )
-        
-        st.markdown("---")
-        
-        # 详细信息
-        st.markdown("### 🔍 详细信息")
-        if filtered_high_quality:
-            selected_qa_idx = st.selectbox(
-                "选择优质问答对查看详情",
-                range(len(filtered_high_quality)),
-                format_func=lambda x: f"{x+1}. {filtered_high_quality[x]['question'][:50]}..." 
-                if len(filtered_high_quality[x]['question']) > 50 
-                else f"{x+1}. {filtered_high_quality[x]['question']}",
-                index=0,
-                key="quality_qa_select"
-            )
+                            # 问题
+                            st.markdown("**❓ 问题**")
+                            st.info(qa['question'])
+                            
+                            # 答案（显示改进后的答案）
+                            st.markdown("**💡 答案**")
+                            st.success(qa['answer'])
             
-            selected_qa = filtered_high_quality[selected_qa_idx]
-            
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.markdown("#### 📝 基本信息")
-                info_data = {
-                    "反馈ID": selected_qa['id'],
-                    "评分": f"{selected_qa['rating']}/5",
-                    "有改进建议": "是" if selected_qa['has_correction'] else "否",
-                    "时间": format_local_time(selected_qa['created_at'], include_seconds=True)
-                }
-                for key, value in info_data.items():
-                    st.markdown(f"**{key}**: {value}")
-            with col2:
-                st.markdown("#### 📊 统计")
-                st.metric("评分", selected_qa['rating'])
-            
-            st.markdown("---")
-            
-            # 问题和答案
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("#### ❓ 问题")
-                st.markdown(f"""
-                <div class='question-box'>
-                    {selected_qa['question']}
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col2:
-                st.markdown("#### 💡 答案")
-                st.markdown(f"""
-                <div class='answer-box'>
-                    {selected_qa['answer']}
-                </div>
-                """, unsafe_allow_html=True)
-            
-            # 如果有改进建议，显示原始答案和改进建议
-            if selected_qa['has_correction']:
-                st.markdown("---")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown("#### 📝 原始答案")
-                    st.markdown(f"""
-                    <div style='background: #fff3e0; padding: 1rem; border-radius: 8px; border-left: 4px solid #FF9800;'>
-                        {selected_qa.get('original_answer', '')}
-                    </div>
-                    """, unsafe_allow_html=True)
-                with col2:
-                    st.markdown("#### ✏️ 改进建议")
-                    st.markdown(f"""
-                    <div style='background: #e1f5fe; padding: 1rem; border-radius: 8px; border-left: 4px solid #03A9F4;'>
-                        {selected_qa.get('correction', '')}
-                    </div>
-                    """, unsafe_allow_html=True)
-            
-            st.info("💡 建议：将此优质问答对添加到意图空间文件中，以提高系统回答质量。")
+                            # 如果有改进建议，显示原始答案和改进建议
+                            if qa['has_correction']:
+                                st.markdown("**📝 原始答案**")
+                                st.text_area("", value=qa.get('original_answer', ''), height=100, disabled=True, key=f"orig_{qa['id']}", label_visibility="collapsed")
+                                
+                                st.markdown("**✏️ 改进建议**")
+                                st.warning(qa.get('correction', ''))
+                            
+                            st.caption(f"反馈ID: {qa['id']} | 时间: {format_local_time(qa['created_at'], include_seconds=True)}")
+                            st.info("💡 建议：将此优质问答对添加到意图空间文件中，以提高系统回答质量。")
+                            st.markdown("---")
 

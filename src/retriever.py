@@ -8,6 +8,64 @@ project_root = Path(__file__).resolve().parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+# --------------------------------------------------------------------------
+# [重要] 在导入 llama_index 之前配置 NLTK 数据路径
+# 避免线上部署时的权限错误（PermissionError）
+# --------------------------------------------------------------------------
+def _setup_nltk_data():
+    """配置 NLTK 数据路径，确保使用项目内的数据"""
+    try:
+        import nltk
+        # 构造项目内部的 nltk_data 文件夹路径
+        nltk_data_dir = project_root / "nltk_data"
+        nltk_data_dir_str = str(nltk_data_dir)
+        
+        # 设置环境变量 NLTK_DATA，确保 NLTK 和 llama_index 都使用项目目录
+        # 这是最可靠的方法，可以避免权限错误
+        if "NLTK_DATA" not in os.environ:
+            os.environ["NLTK_DATA"] = nltk_data_dir_str
+        
+        # 将项目内部的 nltk_data 路径添加到 NLTK 的搜索列表的最前面
+        # 这样 NLTK 会优先使用项目内的数据，而不是尝试下载到系统目录
+        if nltk_data_dir_str not in nltk.data.path:
+            # 插入到最前面，确保优先使用
+            nltk.data.path.insert(0, nltk_data_dir_str)
+        
+        # 检查并预先下载必要的数据（如果不存在且可以下载）
+        # 这样可以避免 llama_index 在初始化时尝试下载到系统目录
+        try:
+            # 检查 punkt 数据是否存在
+            punkt_path = nltk_data_dir / "tokenizers" / "punkt"
+            punkt_tab_path = nltk_data_dir / "tokenizers" / "punkt_tab"
+            
+            # 如果 punkt 或 punkt_tab 都不存在，尝试下载
+            if not punkt_path.exists() and not punkt_tab_path.exists():
+                try:
+                    # 尝试下载 punkt_tab（新版本）或 punkt（旧版本）
+                    logging.info("正在下载 NLTK punkt 数据到项目目录...")
+                    nltk.download("punkt_tab", download_dir=nltk_data_dir_str, quiet=True)
+                except Exception as download_error:
+                    # 如果 punkt_tab 下载失败，尝试下载 punkt
+                    try:
+                        nltk.download("punkt", download_dir=nltk_data_dir_str, quiet=True)
+                    except Exception:
+                        # 下载失败不影响主流程，llama_index 可能会处理
+                        logging.warning(f"NLTK 数据下载失败（不影响主流程）: {download_error}")
+        except Exception as check_error:
+            # 检查或下载失败不影响主流程
+            logging.debug(f"NLTK 数据检查失败（不影响主流程）: {check_error}")
+            
+    except ImportError:
+        # NLTK 未安装，跳过配置（某些环境可能不需要 NLTK）
+        pass
+    except Exception as e:
+        # 配置失败不应该影响主流程，只记录警告
+        logging.warning(f"NLTK 路径配置失败（不影响主流程）: {e}")
+
+# 执行 NLTK 配置
+_setup_nltk_data()
+# --------------------------------------------------------------------------
+
 # 检查 NumPy 版本，避免与 llama-index 的 OpenAILike 冲突
 def _check_numpy_version():
     """检查 NumPy 版本，如果版本过高则提示用户"""

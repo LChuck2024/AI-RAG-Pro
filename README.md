@@ -294,6 +294,30 @@ A: 这通常是由于 NumPy 版本冲突导致的。解决方法：
 
 **注意**: 如果使用 DeepSeek 或 Qwen API（非 OpenAI 官方 API），必须使用 OpenAILike，而 OpenAILike 与 NumPy 2.0+ 存在兼容性问题。
 
+### Q: 线上部署时出现 NLTK PermissionError 怎么办？
+
+A: 这是线上部署时的常见问题，系统已经自动处理。如果仍然遇到问题，请检查：
+
+1. **确保项目目录包含 nltk_data 文件夹**:
+   - 项目根目录下应该有 `nltk_data/` 文件夹
+   - 其中应包含 `tokenizers/punkt/` 或 `tokenizers/punkt_tab/` 数据
+
+2. **如果数据不存在，系统会自动尝试下载**:
+   - 系统会在项目目录中自动下载 NLTK 数据
+   - 如果下载失败（如网络问题），请手动下载
+
+3. **手动下载 NLTK 数据**（如果需要）:
+   ```python
+   import nltk
+   nltk.download('punkt_tab', download_dir='./nltk_data')
+   ```
+
+4. **系统已自动配置**:
+   - `src/utils.py` 和 `src/retriever.py` 中已自动配置 NLTK 数据路径
+   - 系统会优先使用项目目录中的 NLTK 数据，避免权限错误
+
+**注意**: 线上环境（如 Streamlit Cloud）可能无法写入系统目录，因此系统会自动将 NLTK 数据路径指向项目目录。
+
 ## 📝 开发说明
 
 ### 代码结构

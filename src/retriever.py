@@ -110,9 +110,18 @@ except ModuleNotFoundError:
 
 # 尝试导入 Chroma 向量存储
 try:
+    # 在导入 chromadb 之前禁用遥测，避免 posthog 版本兼容性错误
+    os.environ["ANONYMIZED_TELEMETRY"] = "False"
+    
     import chromadb
     from llama_index.vector_stores.chroma import ChromaVectorStore
     CHROMA_AVAILABLE = True
+    
+    # 配置日志过滤器，抑制 ChromaDB 遥测错误
+    import logging
+    chroma_logger = logging.getLogger("chromadb.telemetry")
+    chroma_logger.setLevel(logging.CRITICAL)  # 只显示严重错误
+    chroma_logger.propagate = False  # 不传播到根日志记录器
 except ImportError:
     CHROMA_AVAILABLE = False
     chromadb = None
@@ -291,7 +300,10 @@ class RAGManager:
                 os.makedirs(self.chroma_db_path, exist_ok=True)
                 self.chroma_client = chromadb.PersistentClient(
                     path=self.chroma_db_path,
-                    settings=chromadb.Settings(anonymized_telemetry=False)
+                    settings=chromadb.Settings(
+                        anonymized_telemetry=False,
+                        allow_reset=True
+                    )
                 )
                 logging.info(f"✅ Chroma 向量数据库已初始化: {self.chroma_db_path}")
             except Exception as e:
